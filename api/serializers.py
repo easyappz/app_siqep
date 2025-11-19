@@ -358,6 +358,7 @@ class ReferralEventAdminSerializer(serializers.ModelSerializer):
             "id": member.id,
             "first_name": member.first_name,
             "last_name": member.last_name,
+            "is_influencer": member.is_influencer,
         }
 
     def get_referrer(self, obj: ReferralEvent) -> dict:
