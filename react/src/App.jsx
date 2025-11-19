@@ -8,7 +8,7 @@ import MainLayout from './components/Layout/MainLayout';
 import LoginPage from './components/Auth/Login';
 import RegisterPage from './components/Auth/Register';
 import ProfilePage from './components/Profile';
-import AdminMainPage from './components/Admin';
+import AdminLayout from './components/Admin/Layout';
 import AdminOverviewPage from './components/Admin/Overview';
 import AdminUsersPage from './components/Admin/Users';
 import AdminReferralsPage from './components/Admin/Referrals';
@@ -78,34 +78,15 @@ function App() {
               path="/admin"
               element={
                 <AdminRoute>
-                  <AdminMainPage />
+                  <AdminLayout />
                 </AdminRoute>
               }
-            />
-            <Route
-              path="/admin/overview"
-              element={
-                <AdminRoute>
-                  <AdminOverviewPage />
-                </AdminRoute>
-              }
-            />
-            <Route
-              path="/admin/users"
-              element={
-                <AdminRoute>
-                  <AdminUsersPage />
-                </AdminRoute>
-              }
-            />
-            <Route
-              path="/admin/referrals"
-              element={
-                <AdminRoute>
-                  <AdminReferralsPage />
-                </AdminRoute>
-              }
-            />
+            >
+              <Route index element={<Navigate to="overview" replace />} />
+              <Route path="overview" element={<AdminOverviewPage />} />
+              <Route path="users" element={<AdminUsersPage />} />
+              <Route path="referrals" element={<AdminReferralsPage />} />
+            </Route>
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
