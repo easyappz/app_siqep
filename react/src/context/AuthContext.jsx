@@ -33,13 +33,17 @@ const getInitialAuthState = () => {
 export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(null);
   const [member, setMemberState] = useState(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
 
+  // Initialize auth state from persistent storage once on mount
   useEffect(() => {
     const initial = getInitialAuthState();
     setToken(initial.token);
     setMemberState(initial.member);
+    setIsAuthReady(true);
   }, []);
 
+  // Persist token
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -52,6 +56,7 @@ export const AuthProvider = ({ children }) => {
     }
   }, [token]);
 
+  // Persist member data
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -64,6 +69,7 @@ export const AuthProvider = ({ children }) => {
     }
   }, [member]);
 
+  // Optionally refresh current member data when token is present
   useEffect(() => {
     if (!token) {
       return;
@@ -98,11 +104,13 @@ export const AuthProvider = ({ children }) => {
   const login = (newToken, newMember) => {
     setToken(newToken || null);
     setMemberState(newMember || null);
+    setIsAuthReady(true);
   };
 
   const logout = () => {
     setToken(null);
     setMemberState(null);
+    setIsAuthReady(true);
   };
 
   const setMember = (nextMember) => {
@@ -116,6 +124,7 @@ export const AuthProvider = ({ children }) => {
     user: member,
     isAuthenticated: Boolean(token),
     isAdmin: Boolean(member && member.is_admin),
+    isAuthReady,
     login,
     logout,
     setMember,

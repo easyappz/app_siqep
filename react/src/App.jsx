@@ -15,7 +15,11 @@ import AdminReferralsPage from './components/Admin/Referrals';
 import { useAuth } from './context/AuthContext';
 
 function PrivateRoute({ children }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isAuthReady } = useAuth();
+
+  if (!isAuthReady) {
+    return null;
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
@@ -25,7 +29,11 @@ function PrivateRoute({ children }) {
 }
 
 function AdminRoute({ children }) {
-  const { isAuthenticated, isAdmin } = useAuth();
+  const { isAuthenticated, isAdmin, isAuthReady } = useAuth();
+
+  if (!isAuthReady) {
+    return null;
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
@@ -33,6 +41,20 @@ function AdminRoute({ children }) {
 
   if (!isAdmin) {
     return <Navigate to="/" replace />;
+  }
+
+  return children;
+}
+
+function AuthPageRoute({ children }) {
+  const { isAuthenticated, isAuthReady } = useAuth();
+
+  if (!isAuthReady) {
+    return null;
+  }
+
+  if (isAuthenticated) {
+    return <Navigate to="/profile" replace />;
   }
 
   return children;
@@ -62,8 +84,22 @@ function App() {
         <MainLayout>
           <Routes>
             <Route path="/" element={<Home />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
+            <Route
+              path="/login"
+              element={
+                <AuthPageRoute>
+                  <LoginPage />
+                </AuthPageRoute>
+              }
+            />
+            <Route
+              path="/register"
+              element={
+                <AuthPageRoute>
+                  <RegisterPage />
+                </AuthPageRoute>
+              }
+            />
 
             <Route
               path="/profile"
