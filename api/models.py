@@ -1,3 +1,139 @@
+import secrets
+
+from django.contrib.auth.hashers import check_password, make_password
 from django.db import models
 
-# Create your models here.
+
+class Member(models.Model):
+    id = models.AutoField(primary_key=True)
+    first_name = models.CharField(max_length=100)
+    last_name = models.CharField(max_length=100)
+    phone = models.CharField(max_length=32, unique=True)
+    email = models.EmailField(unique=True, null=True, blank=True)
+    is_influencer = models.BooleanField(default=False)
+    is_admin = models.BooleanField(default=False)
+    referral_code = models.CharField(
+        max_length=32,
+        unique=True,
+        editable=False,
+        null=True,
+        blank=True,
+    )
+    referred_by = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="referrals",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    password_hash = models.CharField(max_length=128)
+    total_bonus_points = models.IntegerField(default=0)
+    total_money_earned = models.IntegerField(
+        default=0,
+        help_text="Total money earned in rubles.",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.first_name} {self.last_name} ({self.phone})"
+
+    @property
+    def is_authenticated(self) -> bool:  # For DRF compatibility
+        return True
+
+    @property
+    def is_anonymous(self) -> bool:
+        return False
+
+    def set_password(self, raw_password: str) -> None:
+        """Hash and store the given raw password."""
+        self.password_hash = make_password(raw_password)
+
+    def check_password(self, raw_password: str) -> bool:
+        """Return True if the given raw password matches the stored hash."""
+        if not self.password_hash:
+            return False
+        return check_password(raw_password, self.password_hash)
+
+    def generate_referral_code(self) -> str:
+        """Generate a deterministic-but-random-looking referral code.
+
+        Uses the instance primary key plus a short random hex suffix.
+        """
+        if not self.pk:
+            raise ValueError("Cannot generate referral code before Member has a primary key.")
+        random_suffix = secrets.token_hex(2).upper()  # 4 hex characters
+        return f"REF{self.pk}{random_suffix}"
+
+    def save(self, *args, **kwargs) -> None:
+        """Ensure a referral_code is generated on first save."""
+        is_new = self.pk is None
+        super().save(*args, **kwargs)
+        if is_new and not self.referral_code:
+            self.referral_code = self.generate_referral_code()
+            super().save(update_fields=["referral_code"])
+
+
+class ReferralEvent(models.Model):
+    id = models.AutoField(primary_key=True)
+    referrer = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="referral_events",
+    )
+    referred = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="referred_event",
+        unique=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    bonus_amount = models.IntegerField(default=0)
+    money_amount = models.IntegerField(
+        default=0,
+        help_text="Money amount for influencer in rubles.",
+    )
+    deposit_amount = models.IntegerField(
+        default=1000,
+        help_text="Deposit amount in rubles associated with the referral.",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"Referral from {self.referrer} to {self.referred}"
+
+
+class MemberAuthToken(models.Model):
+    key = models.CharField(primary_key=True, max_length=64, editable=False)
+    member = models.OneToOneField(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="auth_token",
+    )
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created"]
+
+    def __str__(self) -> str:
+        return f"Token for {self.member}"
+
+    @staticmethod
+    def generate_key() -> str:
+        """Generate a secure random token key."""
+        return secrets.token_hex(32)
+
+    @classmethod
+    def create_for_member(cls, member: "Member") -> "MemberAuthToken":
+        """Create or regenerate a token for the given member.
+
+        Ensures there is at most one active token per member.
+        """
+        cls.objects.filter(member=member).delete()
+        key = cls.generate_key()
+        return cls.objects.create(member=member, key=key)
