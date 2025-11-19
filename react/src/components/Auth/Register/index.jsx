@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { registerMember } from '../../../api/auth';
 import { useAuth } from '../../../context/AuthContext';
@@ -19,6 +19,27 @@ const RegisterPage = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const search = window.location.search || '';
+    if (!search) {
+      return;
+    }
+
+    const params = new URLSearchParams(search);
+    const refFromUrl = params.get('ref');
+
+    if (refFromUrl) {
+      setFormValues((prev) => ({
+        ...prev,
+        referral_code: prev.referral_code || refFromUrl,
+      }));
+    }
+  }, []);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -70,10 +91,12 @@ const RegisterPage = () => {
       payload.referral_code = formValues.referral_code;
     }
 
+    const refCode = formValues.referral_code ? formValues.referral_code : null;
+
     setIsSubmitting(true);
 
     try {
-      const data = await registerMember(payload);
+      const data = await registerMember(payload, refCode);
       const { token, member } = data || {};
 
       if (token && member) {
