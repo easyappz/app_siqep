@@ -231,3 +231,184 @@ class ProfileStatsSerializer(serializers.Serializer):
     total_money_earned = serializers.IntegerField()
     history = ReferralHistoryItemSerializer(many=True)
     registrations_chart = RegistrationsChartPointSerializer(many=True)
+
+
+# ============================
+# Admin-facing serializers
+# ============================
+
+
+class AdminMemberSerializer(serializers.ModelSerializer):
+    """Serializer for listing and managing members in the admin panel."""
+
+    referred_by = MemberReferrerSerializer(read_only=True)
+    total_referrals = serializers.SerializerMethodField()
+    total_bonus_points = serializers.IntegerField(read_only=True)
+    total_money_earned = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Member
+        fields = [
+            "id",
+            "first_name",
+            "last_name",
+            "phone",
+            "email",
+            "is_influencer",
+            "is_admin",
+            "referral_code",
+            "referred_by",
+            "created_at",
+            "total_referrals",
+            "total_bonus_points",
+            "total_money_earned",
+        ]
+        read_only_fields = [
+            "id",
+            "referral_code",
+            "referred_by",
+            "created_at",
+            "total_referrals",
+            "total_bonus_points",
+            "total_money_earned",
+        ]
+
+    def get_total_referrals(self, obj: Member) -> int:
+        return ReferralEvent.objects.filter(referrer=obj).count()
+
+
+class AdminCreateMemberSerializer(serializers.ModelSerializer):
+    """Serializer for creating members (including influencers/admins) via admin panel."""
+
+    password = serializers.CharField(write_only=True, min_length=6)
+
+    class Meta:
+        model = Member
+        fields = [
+            "id",
+            "first_name",
+            "last_name",
+            "phone",
+            "email",
+            "password",
+            "is_influencer",
+            "is_admin",
+        ]
+        read_only_fields = ["id"]
+
+    def validate_phone(self, value: str) -> str:
+        if Member.objects.filter(phone=value).exists():
+            raise serializers.ValidationError(
+                "Пользователь с таким номером телефона уже существует."
+            )
+        return value
+
+    def validate_email(self, value: str) -> str:
+        if not value:
+            return value
+        if Member.objects.filter(email=value).exists():
+            raise serializers.ValidationError(
+                "Пользователь с такой электронной почтой уже существует."
+            )
+        return value
+
+    def create(self, validated_data: dict) -> Member:
+        raw_password = validated_data.pop("password")
+
+        # Normalize empty email to None
+        email = validated_data.get("email")
+        if email == "":
+            validated_data["email"] = None
+
+        member = Member(
+            first_name=validated_data.get("first_name", ""),
+            last_name=validated_data.get("last_name", ""),
+            phone=validated_data.get("phone", ""),
+            email=validated_data.get("email"),
+            is_influencer=validated_data.get("is_influencer", False),
+            is_admin=validated_data.get("is_admin", False),
+        )
+        member.set_password(raw_password)
+        member.save()
+        return member
+
+
+class ReferralEventAdminSerializer(serializers.ModelSerializer):
+    """Serializer for referral events listing in the admin panel."""
+
+    referrer = serializers.SerializerMethodField()
+    referred = serializers.SerializerMethodField()
+    referrer_is_influencer = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReferralEvent
+        fields = [
+            "id",
+            "referrer",
+            "referred",
+            "bonus_amount",
+            "money_amount",
+            "deposit_amount",
+            "created_at",
+            "referrer_is_influencer",
+        ]
+
+    def _member_to_dict(self, member: Member) -> dict:
+        return {
+            "id": member.id,
+            "first_name": member.first_name,
+            "last_name": member.last_name,
+        }
+
+    def get_referrer(self, obj: ReferralEvent) -> dict:
+        return self._member_to_dict(obj.referrer)
+
+    def get_referred(self, obj: ReferralEvent) -> dict:
+        return self._member_to_dict(obj.referred)
+
+    def get_referrer_is_influencer(self, obj: ReferralEvent) -> bool:
+        return bool(obj.referrer.is_influencer)
+
+
+class AdminRegistrationsByDaySerializer(serializers.Serializer):
+    """Single item for registrations by day on admin dashboard."""
+
+    date = serializers.DateField()
+    count = serializers.IntegerField()
+
+
+class AdminTopReferrerSerializer(serializers.Serializer):
+    """Top referrer item for admin dashboard.
+
+    Aggregated by ReferralEvent.
+    """
+
+    id = serializers.IntegerField()
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+    is_influencer = serializers.BooleanField()
+    total_referrals = serializers.IntegerField()
+    total_bonus_points = serializers.IntegerField()
+    total_money_earned = serializers.IntegerField()
+
+
+class AdminIncomeBySourceSerializer(serializers.Serializer):
+    """Income breakdown for admin dashboard."""
+
+    total_income = serializers.IntegerField()
+    income_from_influencers = serializers.IntegerField()
+    income_from_regular_users = serializers.IntegerField()
+
+
+class AdminStatsOverviewSerializer(serializers.Serializer):
+    """Aggregated statistics for admin dashboard.
+
+    Used by React-админка для отображения общей статистики:
+    - регистрации по дням,
+    - топ рефереров,
+    - доход по источникам.
+    """
+
+    registrations_by_day = AdminRegistrationsByDaySerializer(many=True)
+    top_referrers = AdminTopReferrerSerializer(many=True)
+    income_by_source = AdminIncomeBySourceSerializer()

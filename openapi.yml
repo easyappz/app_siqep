@@ -97,6 +97,207 @@ paths:
                 $ref: '#/components/schemas/ProfileStats'
         '401':
           description: Требуется аутентификация
+  /api/admin/members/:
+    get:
+      operationId: admin_members_list
+      summary: 'Админ-панель: Все пользователи'
+      description: 'Список всех пользователей (Member) для админ-панели.'
+      tags:
+        - admin
+      security:
+        - MemberTokenAuth: []
+      responses:
+        '200':
+          description: Список пользователей
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAdminMemberList'
+        '401':
+          description: Требуется аутентификация
+    post:
+      operationId: admin_members_create
+      summary: 'Админ-панель: Создать пользователя'
+      description: 'Создание нового пользователя (включая инфлюенсеров и администраторов) через админ-панель.'
+      tags:
+        - admin
+      security:
+        - MemberTokenAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminMemberCreateRequest'
+      responses:
+        '201':
+          description: Пользователь создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminMember'
+        '400':
+          description: Ошибка валидации данных
+        '401':
+          description: Требуется аутентификация
+  /api/admin/members/{id}/:
+    get:
+      operationId: admin_members_retrieve
+      summary: 'Админ-панель: Детали пользователя'
+      description: 'Получить подробную информацию о пользователе для админ-панели.'
+      tags:
+        - admin
+      security:
+        - MemberTokenAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 'ID пользователя.'
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Детали пользователя
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminMember'
+        '401':
+          description: Требуется аутентификация
+        '404':
+          description: Пользователь не найден
+    patch:
+      operationId: admin_members_partial_update
+      summary: 'Админ-панель: Частичное обновление пользователя'
+      description: 'Изменение контактных данных и флагов is_influencer / is_admin пользователя.'
+      tags:
+        - admin
+      security:
+        - MemberTokenAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 'ID пользователя.'
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminMember'
+      responses:
+        '200':
+          description: Пользователь обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminMember'
+        '400':
+          description: Ошибка валидации данных
+        '401':
+          description: Требуется аутентификация
+        '404':
+          description: Пользователь не найден
+    put:
+      operationId: admin_members_update
+      summary: 'Админ-панель: Полное обновление пользователя'
+      description: 'Полное обновление информации о пользователе (кроме пароля и реферального кода).'
+      tags:
+        - admin
+      security:
+        - MemberTokenAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 'ID пользователя.'
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminMember'
+      responses:
+        '200':
+          description: Пользователь обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminMember'
+        '400':
+          description: Ошибка валидации данных
+        '401':
+          description: Требуется аутентификация
+        '404':
+          description: Пользователь не найден
+  /api/admin/referrals/:
+    get:
+      operationId: admin_referrals_list
+      summary: 'Админ-панель: Все реферальные ссылки'
+      description: 'Список всех реферальных событий с возможностью фильтрации по пользователю, типу (инфлюенсер/обычный) и диапазону дат.'
+      tags:
+        - admin
+      security:
+        - MemberTokenAuth: []
+      parameters:
+        - name: referrer_id
+          in: query
+          required: false
+          description: 'Фильтр по ID пользователя-реферера.'
+          schema:
+            type: integer
+        - name: is_influencer
+          in: query
+          required: false
+          description: 'Фильтр по типу реферера: инфлюенсер (true) или обычный пользователь (false).'
+          schema:
+            type: boolean
+        - name: from_date
+          in: query
+          required: false
+          description: 'Начальная дата диапазона (YYYY-MM-DD) для фильтрации по дате создания.'
+          schema:
+            type: string
+            format: date
+        - name: to_date
+          in: query
+          required: false
+          description: 'Конечная дата диапазона (YYYY-MM-DD) для фильтрации по дате создания.'
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Список реферальных событий
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedReferralEventAdminList'
+        '401':
+          description: Требуется аутентификация
+  /api/admin/stats/overview/:
+    get:
+      operationId: admin_stats_overview_retrieve
+      summary: 'Админ-панель: Общая статистика'
+      description: 'Общая статистика для админ-панели: Регистрации по дням, Топ рефереров, Доход по источникам.'
+      tags:
+        - admin
+      security:
+        - MemberTokenAuth: []
+      responses:
+        '200':
+          description: Общая статистика для админ-панели
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminStatsOverview'
+        '401':
+          description: Требуется аутентификация
 components:
   schemas:
     Message:
@@ -323,6 +524,295 @@ components:
         - total_money_earned
         - history
         - registrations_chart
+    AdminMember:
+      type: object
+      description: 'Пользователь для отображения и управления в админ-панели.'
+      properties:
+        id:
+          type: integer
+          description: 'Идентификатор пользователя.'
+          readOnly: true
+        first_name:
+          type: string
+          description: 'Имя пользователя.'
+        last_name:
+          type: string
+          description: 'Фамилия пользователя.'
+        phone:
+          type: string
+          description: 'Номер телефона пользователя.'
+        email:
+          type: string
+          format: email
+          nullable: true
+          description: 'Электронная почта пользователя.'
+        is_influencer:
+          type: boolean
+          description: 'Является ли пользователь инфлюенсером.'
+        is_admin:
+          type: boolean
+          description: 'Является ли пользователь администратором.'
+        referral_code:
+          type: string
+          description: 'Уникальный реферальный код пользователя.'
+          readOnly: true
+        referred_by:
+          allOf:
+            - $ref: '#/components/schemas/MemberReferrer'
+          nullable: true
+          description: 'Пользователь, который привёл данного участника.'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          description: 'Дата и время регистрации пользователя.'
+          readOnly: true
+        total_referrals:
+          type: integer
+          description: 'Общее количество рефералов (агрегировано по ReferralEvent).'
+          readOnly: true
+        total_bonus_points:
+          type: integer
+          description: 'Общее количество заработанных бонусных баллов (агрегировано по ReferralEvent).'
+          readOnly: true
+        total_money_earned:
+          type: integer
+          description: 'Общая сумма заработанных денег в рублях (агрегировано по ReferralEvent).'
+          readOnly: true
+      required:
+        - id
+        - first_name
+        - last_name
+        - phone
+        - is_influencer
+        - is_admin
+        - referral_code
+        - created_at
+        - total_referrals
+        - total_bonus_points
+        - total_money_earned
+    AdminMemberCreateRequest:
+      type: object
+      description: 'Данные для создания пользователя через админ-панель.'
+      properties:
+        first_name:
+          type: string
+          description: 'Имя пользователя.'
+        last_name:
+          type: string
+          description: 'Фамилия пользователя.'
+        phone:
+          type: string
+          description: 'Номер телефона пользователя.'
+        email:
+          type: string
+          format: email
+          nullable: true
+          description: 'Электронная почта пользователя.'
+        password:
+          type: string
+          format: password
+          description: 'Пароль (минимум 6 символов).'
+        is_influencer:
+          type: boolean
+          description: 'Отметка, что пользователь является инфлюенсером.'
+        is_admin:
+          type: boolean
+          description: 'Отметка, что пользователь является администратором.'
+      required:
+        - first_name
+        - last_name
+        - phone
+        - password
+    ReferralEventAdmin:
+      type: object
+      description: 'Реферальное событие для отображения в админ-панели.'
+      properties:
+        id:
+          type: integer
+          description: 'Идентификатор реферального события.'
+        referrer:
+          type: object
+          description: 'Реферер (пригласивший пользователь).'
+          properties:
+            id:
+              type: integer
+            first_name:
+              type: string
+            last_name:
+              type: string
+            is_influencer:
+              type: boolean
+          required:
+            - id
+            - first_name
+            - last_name
+            - is_influencer
+        referred:
+          type: object
+          description: 'Привлечённый пользователь.'
+          properties:
+            id:
+              type: integer
+            first_name:
+              type: string
+            last_name:
+              type: string
+          required:
+            - id
+            - first_name
+            - last_name
+        bonus_amount:
+          type: integer
+          description: 'Количество бонусных баллов, начисленных за реферала.'
+        money_amount:
+          type: integer
+          description: 'Сумма денег в рублях, начисленная инфлюенсеру.'
+        deposit_amount:
+          type: integer
+          description: 'Сумма депозита в рублях, связанная с реферальным событием.'
+        created_at:
+          type: string
+          format: date-time
+          description: 'Дата и время создания реферального события.'
+        referrer_is_influencer:
+          type: boolean
+          description: 'Флаг, указывающий, является ли реферер инфлюенсером.'
+      required:
+        - id
+        - referrer
+        - referred
+        - bonus_amount
+        - money_amount
+        - deposit_amount
+        - created_at
+        - referrer_is_influencer
+    AdminStatsRegistrationsByDayItem:
+      type: object
+      description: 'Количество регистраций по дням для админ-панели.'
+      properties:
+        date:
+          type: string
+          format: date
+          description: 'Дата (YYYY-MM-DD).'
+        count:
+          type: integer
+          description: 'Количество регистраций в эту дату.'
+      required:
+        - date
+        - count
+    AdminStatsTopReferrerItem:
+      type: object
+      description: 'Элемент списка «Топ рефереров» для админ-панели.'
+      properties:
+        id:
+          type: integer
+          description: 'ID пользователя-реферера.'
+        first_name:
+          type: string
+          description: 'Имя реферера.'
+        last_name:
+          type: string
+          description: 'Фамилия реферера.'
+        is_influencer:
+          type: boolean
+          description: 'Является ли реферер инфлюенсером.'
+        total_referrals:
+          type: integer
+          description: 'Общее количество привлечённых рефералов.'
+        total_bonus_points:
+          type: integer
+          description: 'Суммарные бонусные баллы, начисленные за рефералов.'
+        total_money_earned:
+          type: integer
+          description: 'Суммарный заработок в рублях, полученный за рефералов.'
+      required:
+        - id
+        - first_name
+        - last_name
+        - is_influencer
+        - total_referrals
+        - total_bonus_points
+        - total_money_earned
+    AdminStatsIncomeBySource:
+      type: object
+      description: 'Доход по источникам для админ-панели.'
+      properties:
+        total_income:
+          type: integer
+          description: 'Общий доход (количество реферальных событий × 1000 руб.).'
+        income_from_influencers:
+          type: integer
+          description: 'Доход от клиентов, привлечённых инфлюенсерами (количество таких событий × 1000 руб.).'
+        income_from_regular_users:
+          type: integer
+          description: 'Доход от клиентов, привлечённых обычными пользователями.'
+      required:
+        - total_income
+        - income_from_influencers
+        - income_from_regular_users
+    AdminStatsOverview:
+      type: object
+      description: 'Общая статистика для админ-панели: Регистрации по дням, Топ рефереров, Доход по источникам.'
+      properties:
+        registrations_by_day:
+          type: array
+          description: 'Регистрации по дням.'
+          items:
+            $ref: '#/components/schemas/AdminStatsRegistrationsByDayItem'
+        top_referrers:
+          type: array
+          description: 'Топ рефереров по количеству привлечённых клиентов.'
+          items:
+            $ref: '#/components/schemas/AdminStatsTopReferrerItem'
+        income_by_source:
+          $ref: '#/components/schemas/AdminStatsIncomeBySource'
+      required:
+        - registrations_by_day
+        - top_referrers
+        - income_by_source
+    PaginatedAdminMemberList:
+      type: object
+      description: 'Страница списка пользователей для админ-панели.'
+      properties:
+        count:
+          type: integer
+        next:
+          type: string
+          format: uri
+          nullable: true
+        previous:
+          type: string
+          format: uri
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminMember'
+      required:
+        - count
+        - results
+    PaginatedReferralEventAdminList:
+      type: object
+      description: 'Страница списка реферальных событий для админ-панели.'
+      properties:
+        count:
+          type: integer
+        next:
+          type: string
+          format: uri
+          nullable: true
+        previous:
+          type: string
+          format: uri
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReferralEventAdmin'
+      required:
+        - count
+        - results
   securitySchemes:
     basicAuth:
       type: http
