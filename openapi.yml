@@ -9,11 +9,11 @@ paths:
       operationId: api_hello_retrieve
       description: Get a hello world message
       tags:
-      - api
+        - api
       security:
-      - cookieAuth: []
-      - basicAuth: []
-      - {}
+        - cookieAuth: []
+        - basicAuth: []
+        - {}
       responses:
         '200':
           content:
@@ -21,6 +21,82 @@ paths:
               schema:
                 $ref: '#/components/schemas/Message'
           description: ''
+  /api/auth/register/:
+    post:
+      operationId: auth_register_create
+      description: 'Регистрация нового пользователя по номеру телефона с опциональным реферальным кодом.'
+      tags:
+        - auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegistrationRequest'
+      responses:
+        '201':
+          description: Успешная регистрация
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationResponse'
+        '400':
+          description: Ошибка валидации данных регистрации
+  /api/auth/login/:
+    post:
+      operationId: auth_login_create
+      description: 'Авторизация пользователя по номеру телефона и паролю.'
+      tags:
+        - auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Успешная авторизация
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Ошибка валидации данных авторизации
+  /api/auth/me/:
+    get:
+      operationId: auth_me_retrieve
+      description: 'Получить профиль текущего авторизованного пользователя.'
+      tags:
+        - auth
+      security:
+        - MemberTokenAuth: []
+      responses:
+        '200':
+          description: Профиль пользователя
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Member'
+        '401':
+          description: Требуется аутентификация
+  /api/profile/stats/:
+    get:
+      operationId: profile_stats_retrieve
+      description: 'Получить статистику реферальной программы: количество рефералов, заработанные бонусы и деньги, история начислений и график регистраций.'
+      tags:
+        - profile
+      security:
+        - MemberTokenAuth: []
+      responses:
+        '200':
+          description: Статистика профиля
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileStats'
+        '401':
+          description: Требуется аутентификация
 components:
   schemas:
     Message:
@@ -34,8 +110,219 @@ components:
           format: date-time
           readOnly: true
       required:
-      - message
-      - timestamp
+        - message
+        - timestamp
+    MemberReferrer:
+      type: object
+      description: 'Краткая информация о реферере.'
+      properties:
+        id:
+          type: integer
+          description: 'Идентификатор пользователя.'
+        first_name:
+          type: string
+          description: 'Имя пользователя.'
+        last_name:
+          type: string
+          description: 'Фамилия пользователя.'
+        phone:
+          type: string
+          description: 'Номер телефона пользователя.'
+        referral_code:
+          type: string
+          description: 'Реферальный код пользователя.'
+      required:
+        - id
+        - first_name
+        - last_name
+        - phone
+        - referral_code
+    Member:
+      type: object
+      description: 'Пользователь сервиса (Member).'
+      properties:
+        id:
+          type: integer
+          description: 'Идентификатор пользователя.'
+        first_name:
+          type: string
+          description: 'Имя пользователя.'
+        last_name:
+          type: string
+          description: 'Фамилия пользователя.'
+        phone:
+          type: string
+          description: 'Номер телефона, используемый для входа.'
+        email:
+          type: string
+          format: email
+          nullable: true
+          description: 'Электронная почта пользователя.'
+        is_influencer:
+          type: boolean
+          description: 'Является ли пользователь инфлюенсером.'
+        is_admin:
+          type: boolean
+          description: 'Является ли пользователь администратором.'
+        referral_code:
+          type: string
+          description: 'Уникальный реферальный код пользователя.'
+        referred_by:
+          allOf:
+            - $ref: '#/components/schemas/MemberReferrer'
+          nullable: true
+          description: 'Пользователь, который привёл данного участника.'
+        created_at:
+          type: string
+          format: date-time
+          description: 'Дата и время регистрации пользователя.'
+      required:
+        - id
+        - first_name
+        - last_name
+        - phone
+        - is_influencer
+        - is_admin
+        - referral_code
+        - created_at
+    RegistrationRequest:
+      type: object
+      description: 'Данные для регистрации нового пользователя.'
+      properties:
+        first_name:
+          type: string
+          description: 'Имя.'
+        last_name:
+          type: string
+          description: 'Фамилия.'
+        phone:
+          type: string
+          description: 'Номер телефона, который будет использоваться для входа.'
+        email:
+          type: string
+          format: email
+          nullable: true
+          description: 'Электронная почта (необязательно).'
+        password:
+          type: string
+          format: password
+          description: 'Пароль (минимум 6 символов).'
+        referral_code:
+          type: string
+          nullable: true
+          description: 'Реферальный код пригласившего пользователя (необязательно).'
+      required:
+        - first_name
+        - last_name
+        - phone
+        - password
+    RegistrationResponse:
+      type: object
+      description: 'Ответ при успешной регистрации.'
+      properties:
+        member:
+          $ref: '#/components/schemas/Member'
+        token:
+          type: string
+          description: 'Токен аутентификации пользователя (используется в заголовке Authorization: Token <ключ>).'
+      required:
+        - member
+        - token
+    LoginRequest:
+      type: object
+      description: 'Данные для авторизации пользователя.'
+      properties:
+        phone:
+          type: string
+          description: 'Номер телефона.'
+        password:
+          type: string
+          format: password
+          description: 'Пароль.'
+      required:
+        - phone
+        - password
+    LoginResponse:
+      type: object
+      description: 'Ответ при успешной авторизации.'
+      properties:
+        member:
+          $ref: '#/components/schemas/Member'
+        token:
+          type: string
+          description: 'Токен аутентификации пользователя (используется в заголовке Authorization: Token <ключ>).'
+      required:
+        - member
+        - token
+    ReferralHistoryItem:
+      type: object
+      description: 'Элемент истории начислений по реферальной программе.'
+      properties:
+        date:
+          type: string
+          format: date
+          description: 'Дата регистрации реферала.'
+        referred_name:
+          type: string
+          description: 'Имя и фамилия приглашённого пользователя.'
+        bonus_amount:
+          type: integer
+          description: 'Количество бонусных баллов, начисленных за реферала.'
+        money_amount:
+          type: integer
+          description: 'Сумма денег в рублях, начисленная инфлюенсеру.'
+      required:
+        - date
+        - referred_name
+        - bonus_amount
+        - money_amount
+    RegistrationsChartPoint:
+      type: object
+      description: 'Точка на графике регистраций по дням.'
+      properties:
+        date:
+          type: string
+          format: date
+          description: 'Дата (YYYY-MM-DD).'
+        count:
+          type: integer
+          description: 'Количество регистраций по реферальной ссылке в этот день.'
+      required:
+        - date
+        - count
+    ProfileStats:
+      type: object
+      description: 'Статистика реферальной программы для профиля пользователя.'
+      properties:
+        total_referrals:
+          type: integer
+          description: 'Общее количество рефералов.'
+        active_referrals:
+          type: integer
+          description: 'Активные рефералы за последние 30 дней.'
+        total_bonus_points:
+          type: integer
+          description: 'Общее количество заработанных бонусных баллов.'
+        total_money_earned:
+          type: integer
+          description: 'Общая сумма заработанных денег в рублях.'
+        history:
+          type: array
+          description: 'История начислений по реферальной программе.'
+          items:
+            $ref: '#/components/schemas/ReferralHistoryItem'
+        registrations_chart:
+          type: array
+          description: 'График регистраций по дням (количество рефералов в разрезе дат).'
+          items:
+            $ref: '#/components/schemas/RegistrationsChartPoint'
+      required:
+        - total_referrals
+        - active_referrals
+        - total_bonus_points
+        - total_money_earned
+        - history
+        - registrations_chart
   securitySchemes:
     basicAuth:
       type: http
@@ -44,3 +331,8 @@ components:
       type: apiKey
       in: cookie
       name: sessionid
+    MemberTokenAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: 'Используйте формат: `Token <ключ>` для аутентификации пользователя.'
