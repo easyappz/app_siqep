@@ -1,41 +1,43 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { fetchCurrentMember } from '../api/auth';
 
 const AuthContext = createContext(null);
 
 const TOKEN_STORAGE_KEY = 'memberToken';
-const USER_STORAGE_KEY = 'memberUser';
+const MEMBER_STORAGE_KEY = 'memberData';
 
 const getInitialAuthState = () => {
   if (typeof window === 'undefined') {
-    return { token: null, user: null };
+    return { token: null, member: null };
   }
 
   const storedToken = window.localStorage.getItem(TOKEN_STORAGE_KEY);
-  const storedUserRaw = window.localStorage.getItem(USER_STORAGE_KEY);
+  const storedMemberRaw = window.localStorage.getItem(MEMBER_STORAGE_KEY);
 
-  let storedUser = null;
-  if (storedUserRaw) {
+  let storedMember = null;
+  if (storedMemberRaw) {
     try {
-      storedUser = JSON.parse(storedUserRaw);
-    } catch {
-      storedUser = null;
+      storedMember = JSON.parse(storedMemberRaw);
+    } catch (error) {
+      console.error('Failed to parse stored member data', error);
+      storedMember = null;
     }
   }
 
   return {
     token: storedToken || null,
-    user: storedUser,
+    member: storedMember,
   };
 };
 
 export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(null);
-  const [user, setUser] = useState(null);
+  const [member, setMemberState] = useState(null);
 
   useEffect(() => {
     const initial = getInitialAuthState();
     setToken(initial.token);
-    setUser(initial.user);
+    setMemberState(initial.member);
   }, []);
 
   useEffect(() => {
@@ -55,31 +57,68 @@ export const AuthProvider = ({ children }) => {
       return;
     }
 
-    if (user) {
-      window.localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+    if (member) {
+      window.localStorage.setItem(MEMBER_STORAGE_KEY, JSON.stringify(member));
     } else {
-      window.localStorage.removeItem(USER_STORAGE_KEY);
+      window.localStorage.removeItem(MEMBER_STORAGE_KEY);
     }
-  }, [user]);
+  }, [member]);
 
-  const login = (newToken, newUser) => {
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    const loadCurrentMember = async () => {
+      try {
+        const currentMember = await fetchCurrentMember();
+
+        if (!isCancelled) {
+          setMemberState(currentMember || null);
+        }
+      } catch (error) {
+        console.error('Failed to fetch current member', error);
+
+        if (!isCancelled) {
+          setToken(null);
+          setMemberState(null);
+        }
+      }
+    };
+
+    loadCurrentMember();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [token]);
+
+  const login = (newToken, newMember) => {
     setToken(newToken || null);
-    setUser(newUser || null);
+    setMemberState(newMember || null);
   };
 
   const logout = () => {
     setToken(null);
-    setUser(null);
+    setMemberState(null);
+  };
+
+  const setMember = (nextMember) => {
+    setMemberState(nextMember || null);
   };
 
   const value = {
     token,
-    user,
+    member,
+    // Backward compatibility: expose `user` alias if older code relies on it
+    user: member,
     isAuthenticated: Boolean(token),
-    isAdmin: Boolean(user && user.is_admin),
+    isAdmin: Boolean(member && member.is_admin),
     login,
     logout,
-    setUser,
+    setMember,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
