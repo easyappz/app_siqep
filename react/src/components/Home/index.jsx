@@ -1,12 +1,25 @@
 import React from 'react';
 
 /**
- * Для ИИ: Это заглушка. Обнови этот компонент. Здесь должен быть начальный экран приложения.
+ * Главная страница реферального сервиса.
  */
 export const Home = () => {
   return (
-    <div data-easytag="id1-src/components/Home/index.jsx">
-      <div>This is home page</div>
-    </div>
+    <main
+      data-easytag="id1-react/src/components/Home/index.jsx"
+      className="page page-home"
+    >
+      <div className="container">
+        <section className="card card-hero">
+          <h1 className="page-title">Реферальная программа</h1>
+          <p className="page-subtitle">
+            Приглашайте пользователей и инфлюенсеров, отслеживайте
+            регистрацию и доход в удобной современной панели.
+          </p>
+        </section>
+      </div>
+    </main>
   );
 };
+
+export default Home;
