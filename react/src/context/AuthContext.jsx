@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { fetchCurrentMember } from '../api/auth';
 
-const AuthContext = createContext(null);
+export const AuthContext = createContext(null);
 
 const TOKEN_STORAGE_KEY = 'memberToken';
 const MEMBER_STORAGE_KEY = 'memberData';
