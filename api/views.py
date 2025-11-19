@@ -49,7 +49,14 @@ class RegisterView(APIView):
         description="Регистрация нового пользователя по номеру телефона.",
     )
     def post(self, request):
-        serializer = RegistrationSerializer(data=request.data)
+        # Support referral code both in request body (referral_code)
+        # and as a query parameter (?ref=CODE) used in referral links.
+        data = request.data.copy()
+        ref_from_query = request.query_params.get("ref")
+        if ref_from_query and not data.get("referral_code"):
+            data["referral_code"] = ref_from_query
+
+        serializer = RegistrationSerializer(data=data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

@@ -27,6 +27,13 @@ paths:
       description: 'Регистрация нового пользователя по номеру телефона с опциональным реферальным кодом.'
       tags:
         - auth
+      parameters:
+        - name: ref
+          in: query
+          required: false
+          description: 'Реферальный код пригласившего пользователя. Если указан, используется так же, как поле `referral_code` в теле запроса.'
+          schema:
+            type: string
       requestBody:
         required: true
         content:

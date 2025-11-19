@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework import serializers
 
 from .models import Member, ReferralEvent
@@ -94,30 +95,32 @@ class RegistrationSerializer(serializers.Serializer):
         """Validate referral_code if provided and resolve referrer Member.
 
         Stores resolved referrer in attrs["referrer"] for later use in create().
+        If referral_code does not match any Member, registration continues
+        without attaching a referrer.
         """
         referral_code = attrs.get("referral_code") or ""
         if referral_code:
             try:
                 referrer = Member.objects.get(referral_code=referral_code)
             except Member.DoesNotExist:
-                raise serializers.ValidationError(
-                    {"referral_code": "Указанный реферальный код не найден."}
-                )
+                # Invalid referral code: ignore and proceed without referrer
+                return attrs
             attrs["referrer"] = referrer
         return attrs
 
+    @transaction.atomic
     def create(self, validated_data: dict) -> Member:
         """Create a new Member and handle referral business logic.
 
         Business rules:
-        - 1 клиент = 1 депозит = 1000 рублей.
-        - Если referrer.is_influencer == False:
+        - 1 client = 1 deposit = 1000 rubles.
+        - If referrer.is_influencer is False:
           * bonus_amount = 1, money_amount = 0.
-          * referrer.total_bonus_points увеличивается на 1.
-        - Если referrer.is_influencer == True:
-          * bonus_amount = 0, money_amount = 200 (20% от 1000).
-          * referrer.total_money_earned увеличивается на 200.
-        - В любом случае создается ReferralEvent c этими значениями.
+          * referrer.total_bonus_points is increased by 1.
+        - If referrer.is_influencer is True:
+          * bonus_amount = 0, money_amount = 200 (20% of 1000).
+          * referrer.total_money_earned is increased by 200.
+        - In any case when there is a referrer, a ReferralEvent is created.
         """
 
         referrer = validated_data.pop("referrer", None)
@@ -140,7 +143,7 @@ class RegistrationSerializer(serializers.Serializer):
         member.save()
 
         if referrer is not None:
-            # Защита от гипотетической саморефералки (на практике невозможна при регистрации).
+            # Protection from hypothetical self-referral (not possible during normal registration).
             if referrer.id == member.id:
                 raise serializers.ValidationError(
                     "Пользователь не может использовать собственный реферальный код."
