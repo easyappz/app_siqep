@@ -1,6 +1,8 @@
+from datetime import timedelta
 from decimal import Decimal
 
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from .models import (
@@ -19,6 +21,7 @@ from .models import (
     INFLUENCER_DEPTH_BASE_BONUS_CASH,
     INFLUENCER_DEPOSIT_PERCENT,
     MemberAuthToken,
+    PasswordResetCode,
     ReferralEvent,
 )
 from .referral_utils import (
@@ -480,3 +483,260 @@ class TestSimulateDemoDepositsAPITests(TestCase):
                 deposit_amount=2000,
             ).count()
             self.assertEqual(second_count, first_counts[phone])
+
+
+class ChangePasswordAPITests(TestCase):
+    """Tests for authenticated password change endpoint."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.member = Member(
+            first_name="User",
+            last_name="Test",
+            phone="+79990001111",
+            email="user@example.com",
+            is_influencer=False,
+            is_admin=False,
+        )
+        self.member.set_password("oldpass123")
+        self.member.save()
+
+        token = MemberAuthToken.create_for_member(self.member)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+    def test_change_password_success(self):
+        url = "/api/auth/change-password/"
+        payload = {
+            "old_password": "oldpass123",
+            "new_password": "newpass456",
+        }
+
+        response = self.client.post(url, payload, format="json")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data.get("detail"), "Пароль успешно изменён.")
+
+        # Login with new password should succeed
+        login_client = APIClient()
+        login_response_new = login_client.post(
+            "/api/auth/login/",
+            {"phone": self.member.phone, "password": "newpass456"},
+            format="json",
+        )
+        self.assertEqual(login_response_new.status_code, 200)
+        self.assertIn("token", login_response_new.json())
+
+        # Login with old password should fail
+        login_response_old = login_client.post(
+            "/api/auth/login/",
+            {"phone": self.member.phone, "password": "oldpass123"},
+            format="json",
+        )
+        self.assertEqual(login_response_old.status_code, 400)
+
+    def test_change_password_wrong_old_password(self):
+        url = "/api/auth/change-password/"
+        payload = {
+            "old_password": "wrongpass",
+            "new_password": "newpass456",
+        }
+
+        response = self.client.post(url, payload, format="json")
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertIn("old_password", data)
+        self.assertEqual(data["old_password"], ["Неверный текущий пароль."])
+
+    def test_change_password_unauthorized(self):
+        client = APIClient()
+        response = client.post(
+            "/api/auth/change-password/",
+            {"old_password": "oldpass123", "new_password": "newpass456"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 401)
+
+
+class PasswordResetAPITests(TestCase):
+    """Tests for password reset via one-time code endpoints."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.member = Member(
+            first_name="Reset",
+            last_name="User",
+            phone="+79990002222",
+            email="reset@example.com",
+            is_influencer=False,
+            is_admin=False,
+        )
+        self.member.set_password("oldreset123")
+        self.member.save()
+
+    def test_password_reset_request_and_confirm_by_phone(self):
+        # Request reset code by phone
+        request_response = self.client.post(
+            "/api/auth/password-reset/request/",
+            {"phone": self.member.phone},
+            format="json",
+        )
+        self.assertEqual(request_response.status_code, 200)
+        data = request_response.json()
+        self.assertEqual(data.get("detail"), "Код для смены пароля отправлен.")
+        dev_code = data.get("dev_code")
+        self.assertIsNotNone(dev_code)
+        self.assertEqual(len(dev_code), 6)
+
+        # Confirm reset with received code
+        confirm_response = self.client.post(
+            "/api/auth/password-reset/confirm/",
+            {
+                "phone": self.member.phone,
+                "code": dev_code,
+                "new_password": "newreset123",
+            },
+            format="json",
+        )
+        self.assertEqual(confirm_response.status_code, 200)
+        confirm_data = confirm_response.json()
+        self.assertEqual(confirm_data.get("detail"), "Пароль успешно сброшен.")
+
+        # Code must be marked as used
+        reset_code_obj = PasswordResetCode.objects.get(member=self.member, code=dev_code)
+        self.assertTrue(reset_code_obj.is_used)
+
+        # Login with new password should succeed
+        login_client = APIClient()
+        login_response_new = login_client.post(
+            "/api/auth/login/",
+            {"phone": self.member.phone, "password": "newreset123"},
+            format="json",
+        )
+        self.assertEqual(login_response_new.status_code, 200)
+
+        # Old password should no longer work
+        login_response_old = login_client.post(
+            "/api/auth/login/",
+            {"phone": self.member.phone, "password": "oldreset123"},
+            format="json",
+        )
+        self.assertEqual(login_response_old.status_code, 400)
+
+    def test_password_reset_request_invalid_phone(self):
+        response = self.client.post(
+            "/api/auth/password-reset/request/",
+            {"phone": "+79990009900"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertIn("non_field_errors", data)
+        self.assertEqual(
+            data["non_field_errors"],
+            ["Пользователь с таким email/телефоном не найден."],
+        )
+
+    def test_password_reset_request_invalid_email(self):
+        response = self.client.post(
+            "/api/auth/password-reset/request/",
+            {"email": "unknown@example.com"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertIn("non_field_errors", data)
+        self.assertEqual(
+            data["non_field_errors"],
+            ["Пользователь с таким email/телефоном не найден."],
+        )
+
+    def test_password_reset_confirm_invalid_code(self):
+        # Create a valid code first
+        request_response = self.client.post(
+            "/api/auth/password-reset/request/",
+            {"phone": self.member.phone},
+            format="json",
+        )
+        self.assertEqual(request_response.status_code, 200)
+
+        # Try to confirm with a wrong code
+        confirm_response = self.client.post(
+            "/api/auth/password-reset/confirm/",
+            {
+                "phone": self.member.phone,
+                "code": "000000",
+                "new_password": "newreset123",
+            },
+            format="json",
+        )
+        self.assertEqual(confirm_response.status_code, 400)
+        data = confirm_response.json()
+        self.assertIn("code", data)
+        self.assertEqual(data["code"], ["Неверный или просроченный код."])
+
+    def test_password_reset_confirm_expired_code(self):
+        # Request a code
+        request_response = self.client.post(
+            "/api/auth/password-reset/request/",
+            {"phone": self.member.phone},
+            format="json",
+        )
+        self.assertEqual(request_response.status_code, 200)
+        dev_code = request_response.json()["dev_code"]
+
+        # Expire the code manually
+        reset_code_obj = PasswordResetCode.objects.get(member=self.member, code=dev_code)
+        reset_code_obj.expires_at = timezone.now() - timedelta(minutes=1)
+        reset_code_obj.save(update_fields=["expires_at"])
+
+        # Try to confirm with expired code
+        confirm_response = self.client.post(
+            "/api/auth/password-reset/confirm/",
+            {
+                "phone": self.member.phone,
+                "code": dev_code,
+                "new_password": "newreset123",
+            },
+            format="json",
+        )
+        self.assertEqual(confirm_response.status_code, 400)
+        data = confirm_response.json()
+        self.assertIn("code", data)
+        self.assertEqual(data["code"], ["Неверный или просроченный код."])
+
+    def test_password_reset_confirm_reuse_code_not_allowed(self):
+        # Request a code
+        request_response = self.client.post(
+            "/api/auth/password-reset/request/",
+            {"phone": self.member.phone},
+            format="json",
+        )
+        self.assertEqual(request_response.status_code, 200)
+        dev_code = request_response.json()["dev_code"]
+
+        # First successful confirmation
+        first_confirm = self.client.post(
+            "/api/auth/password-reset/confirm/",
+            {
+                "phone": self.member.phone,
+                "code": dev_code,
+                "new_password": "newreset123",
+            },
+            format="json",
+        )
+        self.assertEqual(first_confirm.status_code, 200)
+
+        # Second attempt with the same code must fail
+        second_confirm = self.client.post(
+            "/api/auth/password-reset/confirm/",
+            {
+                "phone": self.member.phone,
+                "code": dev_code,
+                "new_password": "anotherpass123",
+            },
+            format="json",
+        )
+        self.assertEqual(second_confirm.status_code, 400)
+        data = second_confirm.json()
+        self.assertIn("code", data)
+        self.assertEqual(data["code"], ["Неверный или просроченный код."])

@@ -1,3 +1,6 @@
+from datetime import timedelta
+import secrets
+
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -9,6 +12,7 @@ from .models import (
     RankRule,
     Deposit,
     WithdrawalRequest,
+    PasswordResetCode,
 )
 from .referral_utils import (
     on_new_user_registered,
@@ -389,6 +393,170 @@ class LoginSerializer(serializers.Serializer):
 
         attrs["member"] = member
         return attrs
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """Serializer for changing the current member password."""
+
+    old_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True)
+
+    def validate_old_password(self, value: str) -> str:
+        request = self.context.get("request")
+        member = getattr(request, "user", None) if request is not None else None
+
+        if not isinstance(member, Member):
+            raise serializers.ValidationError(
+                "Не удалось определить текущего пользователя."
+            )
+
+        if not member.check_password(value):
+            raise serializers.ValidationError("Неверный текущий пароль.")
+
+        return value
+
+    def validate_new_password(self, value: str) -> str:
+        if len(value) < 6:
+            raise serializers.ValidationError(
+                "Пароль должен содержать не менее 6 символов."
+            )
+        return value
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    """Serializer for requesting a password reset code by email or phone."""
+
+    email = serializers.EmailField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
+    phone = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
+
+    def validate(self, attrs):
+        email = attrs.get("email")
+        phone = attrs.get("phone")
+
+        email_is_empty = not email or (isinstance(email, str) and email.strip() == "")
+        phone_is_empty = not phone or (isinstance(phone, str) and phone.strip() == "")
+
+        if email_is_empty and phone_is_empty:
+            raise serializers.ValidationError(
+                {"non_field_errors": ["Необходимо указать email или номер телефона."]}
+            )
+
+        member = None
+        if not email_is_empty:
+            member = Member.objects.filter(email=email).first()
+
+        if member is None and not phone_is_empty:
+            member = Member.objects.filter(phone=phone).first()
+
+        if member is None:
+            raise serializers.ValidationError(
+                {"non_field_errors": ["Пользователь с таким email/телефоном не найден."]}
+            )
+
+        attrs["member"] = member
+        return attrs
+
+    def create(self, validated_data):
+        member: Member = validated_data["member"]
+
+        # Mark all previous unused codes for this member as used to prevent reuse.
+        PasswordResetCode.objects.filter(
+            member=member,
+            is_used=False,
+        ).update(is_used=True)
+
+        code_length = 6
+        digits = []
+        for _ in range(code_length):
+            digit = secrets.randbelow(10)
+            digits.append(str(digit))
+        code = "".join(digits)
+
+        expires_at = timezone.now() + timedelta(minutes=15)
+
+        reset_code = PasswordResetCode.objects.create(
+            member=member,
+            code=code,
+            expires_at=expires_at,
+        )
+        return reset_code
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    """Serializer for confirming a reset code and setting a new password."""
+
+    email = serializers.EmailField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
+    phone = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
+    code = serializers.CharField()
+    new_password = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        email = attrs.get("email")
+        phone = attrs.get("phone")
+        code = attrs.get("code")
+
+        email_is_empty = not email or (isinstance(email, str) and email.strip() == "")
+        phone_is_empty = not phone or (isinstance(phone, str) and phone.strip() == "")
+
+        if email_is_empty and phone_is_empty:
+            raise serializers.ValidationError(
+                {"non_field_errors": ["Необходимо указать email или номер телефона."]}
+            )
+
+        member = None
+        if not email_is_empty:
+            member = Member.objects.filter(email=email).first()
+
+        if member is None and not phone_is_empty:
+            member = Member.objects.filter(phone=phone).first()
+
+        if member is None:
+            raise serializers.ValidationError(
+                {"non_field_errors": ["Пользователь с таким email/телефоном не найден."]}
+            )
+
+        reset_code = (
+            PasswordResetCode.objects.filter(
+                member=member,
+                code=code,
+                is_used=False,
+                expires_at__gte=timezone.now(),
+            )
+            .order_by("-created_at")
+            .first()
+        )
+
+        if reset_code is None:
+            raise serializers.ValidationError(
+                {"code": ["Неверный или просроченный код."]}
+            )
+
+        attrs["member"] = member
+        attrs["reset_code"] = reset_code
+        return attrs
+
+    def validate_new_password(self, value: str) -> str:
+        if len(value) < 6:
+            raise serializers.ValidationError(
+                "Пароль должен содержать не менее 6 символов."
+            )
+        return value
 
 
 class MeUpdateSerializer(serializers.ModelSerializer):

@@ -4,6 +4,9 @@ from .views import (
     HelloView,
     RegisterView,
     LoginView,
+    ChangePasswordView,
+    PasswordResetRequestView,
+    PasswordResetConfirmView,
     MeView,
     ProfileStatsView,
     ReferralTreeView,
@@ -21,6 +24,17 @@ urlpatterns = [
     path("hello/", HelloView.as_view(), name="hello"),
     path("auth/register/", RegisterView.as_view(), name="register"),
     path("auth/login/", LoginView.as_view(), name="login"),
+    path("auth/change-password/", ChangePasswordView.as_view(), name="change-password"),
+    path(
+        "auth/password-reset/request/",
+        PasswordResetRequestView.as_view(),
+        name="password-reset-request",
+    ),
+    path(
+        "auth/password-reset/confirm/",
+        PasswordResetConfirmView.as_view(),
+        name="password-reset-confirm",
+    ),
     path("auth/me/", MeView.as_view(), name="me"),
     path("profile/stats/", ProfileStatsView.as_view(), name="profile-stats"),
     path(

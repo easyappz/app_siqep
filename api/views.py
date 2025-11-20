@@ -28,6 +28,9 @@ from .serializers import (
     MemberSerializer,
     RegistrationSerializer,
     LoginSerializer,
+    ChangePasswordSerializer,
+    PasswordResetRequestSerializer,
+    PasswordResetConfirmSerializer,
     MeUpdateSerializer,
     ProfileStatsSerializer,
     ReferralNodeSerializer,
@@ -110,6 +113,82 @@ class LoginView(APIView):
             "token": token.key,
         }
         return Response(response_data, status=status.HTTP_200_OK)
+
+
+class ChangePasswordView(APIView):
+    """Authenticated endpoint for changing the current member's password."""
+
+    authentication_classes = [MemberTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        member: Member = request.user
+        new_password = serializer.validated_data["new_password"]
+
+        member.set_password(new_password)
+        member.save(update_fields=["password_hash"])
+
+        return Response(
+            {"detail": "Пароль успешно изменён."},
+            status=status.HTTP_200_OK,
+        )
+
+
+class PasswordResetRequestView(APIView):
+    """Public endpoint to request a password reset code by email or phone."""
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        reset_code = serializer.save()
+
+        # NOTE: In development environment we return the code in response
+        # to simplify manual testing. In production this code should be
+        # delivered via email/SMS and not returned in the API response.
+        return Response(
+            {
+                "detail": "Код для смены пароля отправлен.",
+                "dev_code": reset_code.code,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class PasswordResetConfirmView(APIView):
+    """Public endpoint to confirm a reset code and set a new password."""
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        member: Member = serializer.validated_data["member"]
+        reset_code = serializer.validated_data["reset_code"]
+        new_password = serializer.validated_data["new_password"]
+
+        member.set_password(new_password)
+        member.save(update_fields=["password_hash"])
+
+        reset_code.is_used = True
+        reset_code.save(update_fields=["is_used"])
+
+        return Response(
+            {"detail": "Пароль успешно сброшен."},
+            status=status.HTTP_200_OK,
+        )
 
 
 class MeView(APIView):

@@ -468,6 +468,30 @@ class MemberAuthToken(models.Model):
         return cls.objects.create(member=member, key=key)
 
 
+class PasswordResetCode(models.Model):
+    """One-time code used to reset a Member's password.
+
+    Codes are created on password reset request and must be confirmed within
+    a limited time window. After successful use, codes are marked as used.
+    """
+
+    member = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="password_reset_codes",
+    )
+    code = models.CharField(max_length=16)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    is_used = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"PasswordResetCode(member={self.member_id}, used={self.is_used})"
+
+
 @receiver(post_save, sender=Deposit)
 def handle_deposit_post_save(sender, instance: "Deposit", created: bool, **kwargs) -> None:
     """When a new Deposit is created, apply full referral logic for this deposit.

@@ -104,6 +104,73 @@ paths:
           description: 'Ошибка валидации данных.'
         '401':
           description: 'Требуется аутентификация.'
+  /api/auth/change-password/:
+    post:
+      operationId: auth_change_password_create
+      description: 'Сменить пароль текущего авторизованного пользователя.'
+      tags:
+        - auth
+      security:
+        - MemberTokenAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '200':
+          description: 'Пароль успешно изменён.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangePasswordResponse'
+        '400':
+          description: 'Ошибка валидации данных (например, неверный текущий пароль или слишком короткий новый пароль).'
+        '401':
+          description: 'Требуется аутентификация.'
+  /api/auth/password-reset/request/:
+    post:
+      operationId: auth_password_reset_request_create
+      description: 'Запросить одноразовый код для сброса пароля по email или телефону.'
+      tags:
+        - auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequestRequest'
+      responses:
+        '200':
+          description: 'Код для смены пароля отправлен.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordResetRequestResponse'
+        '400':
+          description: 'Пользователь с указанными email/телефоном не найден или ошибка валидации.'
+  /api/auth/password-reset/confirm/:
+    post:
+      operationId: auth_password_reset_confirm_create
+      description: 'Подтвердить одноразовый код и задать новый пароль.'
+      tags:
+        - auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirmRequest'
+      responses:
+        '200':
+          description: 'Пароль успешно сброшен.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordResetConfirmResponse'
+        '400':
+          description: 'Неверный или просроченный код, пользователь не найден или ошибка валидации.'
   /api/withdrawal-requests/:
     get:
       operationId: withdrawal_requests_list
@@ -784,6 +851,89 @@ components:
       required:
         - member
         - token
+    ChangePasswordRequest:
+      type: object
+      description: 'Данные для смены пароля текущего авторизованного пользователя.'
+      properties:
+        old_password:
+          type: string
+          format: password
+          description: 'Текущий пароль пользователя.'
+        new_password:
+          type: string
+          format: password
+          description: 'Новый пароль (минимум 6 символов).'
+      required:
+        - old_password
+        - new_password
+    ChangePasswordResponse:
+      type: object
+      description: 'Ответ при успешной смене пароля.'
+      properties:
+        detail:
+          type: string
+          description: 'Сообщение об успешной смене пароля.'
+      required:
+        - detail
+    PasswordResetRequestRequest:
+      type: object
+      description: 'Данные для запроса одноразового кода сброса пароля.'
+      properties:
+        email:
+          type: string
+          format: email
+          nullable: true
+          description: 'Электронная почта пользователя (можно не указывать, если задан телефон).'
+        phone:
+          type: string
+          nullable: true
+          description: 'Номер телефона пользователя (можно не указывать, если задан email).'
+      required: []
+    PasswordResetRequestResponse:
+      type: object
+      description: 'Ответ при успешном запросе кода сброса пароля.'
+      properties:
+        detail:
+          type: string
+          description: 'Текстовое сообщение о том, что код для смены пароля отправлен.'
+        dev_code:
+          type: string
+          description: 'Только для окружения разработки: одноразовый код сброса пароля, возвращается в ответе для удобства тестирования.'
+      required:
+        - detail
+        - dev_code
+    PasswordResetConfirmRequest:
+      type: object
+      description: 'Данные для подтверждения кода сброса и установки нового пароля.'
+      properties:
+        email:
+          type: string
+          format: email
+          nullable: true
+          description: 'Электронная почта пользователя (можно не указывать, если задан телефон).'
+        phone:
+          type: string
+          nullable: true
+          description: 'Номер телефона пользователя (можно не указывать, если задан email).'
+        code:
+          type: string
+          description: 'Одноразовый код сброса пароля, отправленный по email или SMS.'
+        new_password:
+          type: string
+          format: password
+          description: 'Новый пароль (минимум 6 символов).'
+      required:
+        - code
+        - new_password
+    PasswordResetConfirmResponse:
+      type: object
+      description: 'Ответ при успешном сбросе пароля.'
+      properties:
+        detail:
+          type: string
+          description: 'Сообщение об успешном сбросе пароля.'
+      required:
+        - detail
     ReferralHistoryItem:
       type: object
       description: 'Элемент истории начислений по реферальной программе.'
