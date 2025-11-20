@@ -5,6 +5,7 @@ import './index.css';
 import App from './App';
 import { AuthProvider } from './context/AuthContext';
 import './api/axiosAuthInterceptor';
+import './api/axiosLoginErrorInterceptor';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 

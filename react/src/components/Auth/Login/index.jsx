@@ -53,7 +53,22 @@ const LoginPage = () => {
       }
     } catch (error) {
       console.error('Login error', error);
-      setErrorMessage('Неверный номер телефона или пароль.');
+
+      let backendMessage = '';
+
+      if (error && error.response && error.response.data) {
+        const data = error.response.data;
+
+        if (Array.isArray(data.non_field_errors) && data.non_field_errors.length > 0) {
+          backendMessage = data.non_field_errors[0];
+        } else if (typeof data.detail === 'string') {
+          backendMessage = data.detail;
+        }
+      }
+
+      setErrorMessage(
+        backendMessage || 'Неверный номер телефона или пароль.'
+      );
     } finally {
       setIsSubmitting(false);
     }
