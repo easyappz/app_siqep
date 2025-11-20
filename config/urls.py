@@ -16,9 +16,25 @@ Including another URLconf
 """
 
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import include, path, re_path
+from django.views.generic import TemplateView
+
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
+    # Django admin moved to a non-conflicting prefix so that `/admin/...`
+    # can be used by the React admin UI.
+    path("dj-admin/", admin.site.urls),
+
+    # API endpoints
     path("api/", include("api.urls")),
+
+    # Fallback for all other routes: serve the React SPA entry point
+    # (index.html from the React public directory).
+    # This ensures that `/admin/overview` and other frontend routes
+    # are handled by the React router instead of Django admin.
+    re_path(
+        r"^(?!dj-admin/)(?!api/).*$",
+        TemplateView.as_view(template_name="index.html"),
+        name="spa-entry-point",
+    ),
 ]

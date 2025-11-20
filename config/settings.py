@@ -102,7 +102,11 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [
+            # Allow Django to serve the React SPA entry point (index.html)
+            # from the React public directory for non-API routes.
+            BASE_DIR / "react" / "public",
+        ],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -150,7 +154,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
-LANGUAGE_CODE = "en-us"
+LANGUAGE_CODE = "ru-ru"
 
 TIME_ZONE = "UTC"
 

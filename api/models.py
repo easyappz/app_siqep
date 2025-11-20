@@ -36,6 +36,8 @@ class Member(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        verbose_name = "Участник"
+        verbose_name_plural = "Участники"
 
     def __str__(self) -> str:
         return f"{self.first_name} {self.last_name} ({self.phone})"
@@ -103,6 +105,8 @@ class ReferralEvent(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        verbose_name = "Реферальное событие"
+        verbose_name_plural = "Реферальные события"
 
     def __str__(self) -> str:
         return f"Referral from {self.referrer} to {self.referred}"
@@ -119,6 +123,8 @@ class MemberAuthToken(models.Model):
 
     class Meta:
         ordering = ["-created"]
+        verbose_name = "Токен авторизации участника"
+        verbose_name_plural = "Токены авторизации участников"
 
     def __str__(self) -> str:
         return f"Token for {self.member}"
