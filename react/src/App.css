@@ -524,6 +524,10 @@
   max-width: 30rem;
 }
 
+.profile-referral-block {
+  margin-top: 0.5rem;
+}
+
 .profile-referral-input-row {
   display: flex;
   gap: 0.75rem;
@@ -558,6 +562,17 @@
   margin-top: 0.25rem;
   font-size: 0.8rem;
   color: #bbf7d0;
+}
+
+.profile-rules-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.88rem;
+  color: #d1d5db;
+}
+
+.profile-rules-list li {
+  margin-bottom: 0.25rem;
 }
 
 .profile-status-message {
@@ -698,6 +713,100 @@
 
 .profile-history-table tbody tr:hover {
   background: rgba(30, 64, 175, 0.7);
+}
+
+/* Profile: referral tree & rewards */
+
+.profile-tree-card,
+.profile-rewards-card {
+  margin-bottom: 1.5rem;
+}
+
+.profile-tree-header,
+.profile-rewards-header {
+  margin-bottom: 0.75rem;
+}
+
+.profile-tree-loading,
+.profile-tree-error,
+.profile-tree-empty,
+.profile-rewards-loading,
+.profile-rewards-error,
+.profile-rewards-empty {
+  font-size: 0.9rem;
+}
+
+.profile-tree-error,
+.profile-rewards-error {
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.85rem;
+  background: rgba(127, 29, 29, 0.9);
+  border: 1px solid rgba(248, 113, 113, 0.7);
+  color: #fee2e2;
+}
+
+.profile-tree-table-wrapper,
+.profile-rewards-table-wrapper {
+  width: 100%;
+  max-height: 260px;
+  overflow: auto;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  background: rgba(15, 23, 42, 0.9);
+}
+
+.profile-tree-table,
+.profile-rewards-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 520px;
+  font-size: 0.85rem;
+}
+
+.profile-tree-table thead tr,
+.profile-rewards-table thead tr {
+  background: rgba(15, 23, 42, 0.95);
+}
+
+.profile-tree-table th,
+.profile-tree-table td,
+.profile-rewards-table th,
+.profile-rewards-table td {
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(30, 64, 175, 0.6);
+}
+
+.profile-tree-table th,
+.profile-rewards-table th {
+  font-weight: 500;
+  color: #e5e7eb;
+}
+
+.profile-tree-table tbody tr:nth-child(even),
+.profile-rewards-table tbody tr:nth-child(even) {
+  background: rgba(15, 23, 42, 0.9);
+}
+
+.profile-tree-table tbody tr:hover,
+.profile-rewards-table tbody tr:hover {
+  background: rgba(30, 64, 175, 0.7);
+}
+
+.profile-rewards-summary-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.profile-rewards-summary-card {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 1rem 1rem 1.1rem;
+  border-radius: 0.9rem;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.6);
 }
 
 /* Admin layout & pages */
@@ -1123,6 +1232,121 @@
   box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.7);
 }
 
+/* Admin referrals: user structure & rewards */
+
+.admin-member-referral-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.admin-member-search-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+  margin-top: 0.25rem;
+}
+
+.admin-member-search-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.admin-member-search-input {
+  width: 100%;
+}
+
+.admin-member-search-actions {
+  display: flex;
+  align-items: flex-end;
+}
+
+.admin-member-select-row {
+  margin-top: 0.75rem;
+}
+
+.admin-member-select {
+  width: 100%;
+}
+
+.admin-selected-member {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.85rem;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.7);
+  font-size: 0.9rem;
+}
+
+.admin-selected-member-label {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9ca3af;
+  margin-right: 0.35rem;
+}
+
+.admin-selected-member-name {
+  font-weight: 500;
+}
+
+.admin-member-sections-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.admin-member-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.admin-subsection-title {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.admin-subsection-caption {
+  font-size: 0.85rem;
+  color: #d1d5db;
+  margin: 0;
+}
+
+.admin-member-loading,
+.admin-member-error,
+.admin-member-empty {
+  font-size: 0.9rem;
+}
+
+.admin-member-error {
+  margin-top: 0.35rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.85rem;
+  background: rgba(127, 29, 29, 0.9);
+  border: 1px solid rgba(248, 113, 113, 0.7);
+  color: #fee2e2;
+}
+
+.admin-member-summary-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.admin-member-summary-card {
+  flex: 1 1 190px;
+  min-width: 0;
+  padding: 0.75rem 0.85rem 0.85rem;
+  border-radius: 0.8rem;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.6);
+}
+
 @media (max-width: 900px) {
   .home-hero {
     grid-template-columns: minmax(0, 1.9fr) minmax(0, 1.5fr);
@@ -1150,6 +1374,10 @@
 
   .admin-chart-card-wide {
     grid-column: span 1;
+  }
+
+  .admin-member-sections-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -1263,5 +1491,14 @@
 
   .table {
     min-width: 100%;
+  }
+
+  .admin-member-search-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .admin-member-search-actions {
+    justify-content: flex-start;
   }
 }

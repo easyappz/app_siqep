@@ -1,5 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { fetchAdminReferrals, createAdminReferralEvent } from '../../api/admin';
+import {
+  fetchAdminReferrals,
+  createAdminReferralEvent,
+  fetchAdminMembers,
+} from '../../api/admin';
+import { fetchReferralTree, fetchReferralRewards } from '../../api/referrals';
 
 const AdminReferralsPage = () => {
   const [referrals, setReferrals] = useState([]);
@@ -19,6 +24,21 @@ const AdminReferralsPage = () => {
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState('');
   const [createSuccess, setCreateSuccess] = useState('');
+
+  const [memberSearchQuery, setMemberSearchQuery] = useState('');
+  const [memberSearchResults, setMemberSearchResults] = useState([]);
+  const [memberSearchLoading, setMemberSearchLoading] = useState(false);
+  const [memberSearchError, setMemberSearchError] = useState('');
+  const [selectedMemberId, setSelectedMemberId] = useState('');
+  const [selectedMember, setSelectedMember] = useState(null);
+
+  const [memberTreeData, setMemberTreeData] = useState([]);
+  const [memberTreeLoading, setMemberTreeLoading] = useState(false);
+  const [memberTreeError, setMemberTreeError] = useState('');
+
+  const [memberRewardsData, setMemberRewardsData] = useState(null);
+  const [memberRewardsLoading, setMemberRewardsLoading] = useState(false);
+  const [memberRewardsError, setMemberRewardsError] = useState('');
 
   const loadReferrals = async (pageParam, options) => {
     setLoading(true);
@@ -181,6 +201,148 @@ const AdminReferralsPage = () => {
     }
   };
 
+  const handleMemberSearchSubmit = async (event) => {
+    event.preventDefault();
+
+    setMemberSearchError('');
+    setMemberSearchResults([]);
+    setSelectedMemberId('');
+    setSelectedMember(null);
+    setMemberTreeData([]);
+    setMemberTreeError('');
+    setMemberRewardsData(null);
+    setMemberRewardsError('');
+
+    if (!memberSearchQuery) {
+      setMemberSearchError('Введите запрос для поиска пользователя (имя, телефон или ID).');
+      return;
+    }
+
+    setMemberSearchLoading(true);
+
+    try {
+      const data = await fetchAdminMembers({ search: memberSearchQuery, page: 1 });
+      const results = Array.isArray(data?.results) ? data.results : [];
+      setMemberSearchResults(results);
+
+      if (!results.length) {
+        setMemberSearchError('Пользователи не найдены. Измените параметры поиска.');
+      }
+    } catch (err) {
+      console.error('Failed to search admin members', err);
+      setMemberSearchError('Не удалось загрузить список пользователей. Попробуйте позже.');
+    } finally {
+      setMemberSearchLoading(false);
+    }
+  };
+
+  const loadMemberTree = async (memberId) => {
+    if (!memberId) {
+      return;
+    }
+
+    setMemberTreeLoading(true);
+    setMemberTreeError('');
+
+    try {
+      const data = await fetchReferralTree({ member_id: memberId });
+      const nodes = Array.isArray(data?.nodes)
+        ? data.nodes
+        : Array.isArray(data)
+        ? data
+        : [];
+      setMemberTreeData(nodes);
+    } catch (err) {
+      console.error('Failed to load member referral tree', err);
+      setMemberTreeError('Не удалось загрузить структуру рефералов пользователя.');
+    } finally {
+      setMemberTreeLoading(false);
+    }
+  };
+
+  const loadMemberRewards = async (memberId) => {
+    if (!memberId) {
+      return;
+    }
+
+    setMemberRewardsLoading(true);
+    setMemberRewardsError('');
+
+    try {
+      const data = await fetchReferralRewards({ member_id: memberId });
+      setMemberRewardsData(data || null);
+    } catch (err) {
+      console.error('Failed to load member referral rewards', err);
+      setMemberRewardsError('Не удалось загрузить вознаграждения пользователя.');
+    } finally {
+      setMemberRewardsLoading(false);
+    }
+  };
+
+  const handleSelectedMemberChange = (event) => {
+    const value = event.target.value;
+    setSelectedMemberId(value);
+
+    const found = memberSearchResults.find((item) => String(item.id) === value);
+    setSelectedMember(found || null);
+
+    setMemberTreeData([]);
+    setMemberTreeError('');
+    setMemberRewardsData(null);
+    setMemberRewardsError('');
+
+    if (found) {
+      loadMemberTree(found.id);
+      loadMemberRewards(found.id);
+    }
+  };
+
+  const formatRewardTypeLabel = (rewardType) => {
+    if (rewardType === 'PLAYER_STACK') {
+      return 'Бесплатный стартовый стек';
+    }
+    if (rewardType === 'INFLUENCER_FIRST_TOURNAMENT') {
+      return 'Инфлюенсер: первый турнир реферала';
+    }
+    if (rewardType === 'INFLUENCER_DEPOSIT_PERCENT') {
+      return 'Инфлюенсер: процент с депозитов';
+    }
+    if (!rewardType) {
+      return 'Вознаграждение';
+    }
+    return 'Другое вознаграждение';
+  };
+
+  const memberTotalStackCount =
+    memberRewardsData && typeof memberRewardsData.total_stack_count === 'number'
+      ? memberRewardsData.total_stack_count
+      : 0;
+
+  const memberTotalInfluencerAmount =
+    memberRewardsData && typeof memberRewardsData.total_influencer_amount === 'number'
+      ? memberRewardsData.total_influencer_amount
+      : 0;
+
+  const memberTotalFirstTournamentAmount =
+    memberRewardsData &&
+    typeof memberRewardsData.total_first_tournament_amount === 'number'
+      ? memberRewardsData.total_first_tournament_amount
+      : 0;
+
+  const memberTotalDepositPercentAmount =
+    memberRewardsData &&
+    typeof memberRewardsData.total_deposit_percent_amount === 'number'
+      ? memberRewardsData.total_deposit_percent_amount
+      : 0;
+
+  const memberRewardsList = Array.isArray(memberRewardsData?.rewards)
+    ? memberRewardsData.rewards
+    : Array.isArray(memberRewardsData?.items)
+    ? memberRewardsData.items
+    : Array.isArray(memberRewardsData)
+    ? memberRewardsData
+    : [];
+
   return (
     <main
       data-easytag="id1-react/src/components/Admin/Referrals.jsx"
@@ -315,6 +477,309 @@ const AdminReferralsPage = () => {
             </button>
           </div>
         </form>
+      </section>
+
+      <section className="card admin-member-referral-card">
+        <h3 className="admin-form-title">Структура и вознаграждения по пользователю</h3>
+        <p className="admin-form-subtitle">
+          Найдите пользователя и посмотрите его реферальное дерево и все начисленные
+          вознаграждения в глубину структуры.
+        </p>
+
+        <form className="admin-member-search-row" onSubmit={handleMemberSearchSubmit}>
+          <div className="admin-member-search-main">
+            <label className="admin-form-label" htmlFor="memberSearchQuery">
+              Поиск пользователя
+            </label>
+            <input
+              id="memberSearchQuery"
+              type="text"
+              className="admin-form-input admin-member-search-input"
+              placeholder="Имя, фамилия, телефон или ID"
+              value={memberSearchQuery}
+              onChange={(event) => setMemberSearchQuery(event.target.value)}
+            />
+          </div>
+
+          <div className="admin-member-search-actions">
+            <button
+              type="submit"
+              className="btn btn-secondary"
+              disabled={memberSearchLoading}
+            >
+              {memberSearchLoading ? 'Поиск...' : 'Найти'}
+            </button>
+          </div>
+        </form>
+
+        {memberSearchError && (
+          <p className="admin-member-error">{memberSearchError}</p>
+        )}
+
+        {memberSearchResults.length > 0 && (
+          <div className="admin-member-select-row">
+            <div className="admin-form-field">
+              <label className="admin-form-label" htmlFor="selectedMemberId">
+                Выберите пользователя из списка
+              </label>
+              <select
+                id="selectedMemberId"
+                className="admin-form-input admin-member-select"
+                value={selectedMemberId}
+                onChange={handleSelectedMemberChange}
+              >
+                <option value="">Не выбран</option>
+                {memberSearchResults.map((user) => {
+                  const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim();
+                  const label = fullName || user.phone || `ID ${user.id}`;
+
+                  return (
+                    <option key={user.id} value={user.id}>
+                      {label} (ID {user.id})
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          </div>
+        )}
+
+        {selectedMember && (
+          <>
+            <div className="admin-selected-member">
+              <span className="admin-selected-member-label">Выбранный пользователь:</span>
+              <span className="admin-selected-member-name">
+                {selectedMember.first_name} {selectedMember.last_name}{' '}
+                {selectedMember.phone ? `· ${selectedMember.phone}` : ''}
+              </span>
+            </div>
+
+            <div className="admin-member-sections-grid">
+              <div className="admin-member-section">
+                <h4 className="admin-subsection-title">Структура рефералов пользователя</h4>
+                <p className="admin-subsection-caption">
+                  Все игроки в структуре выбранного пользователя с указанием уровня и
+                  количества рефералов в глубину.
+                </p>
+
+                {memberTreeLoading && (
+                  <p className="admin-member-loading">Загрузка структуры...</p>
+                )}
+
+                {memberTreeError && !memberTreeLoading && (
+                  <p className="admin-member-error">{memberTreeError}</p>
+                )}
+
+                {!memberTreeLoading && !memberTreeError && (
+                  memberTreeData.length === 0 ? (
+                    <p className="admin-member-empty">
+                      У пользователя пока нет рефералов.
+                    </p>
+                  ) : (
+                    <div className="table-wrapper">
+                      <table className="table admin-table">
+                        <thead>
+                          <tr>
+                            <th>Имя / Ник</th>
+                            <th>Уровень</th>
+                            <th>Статус</th>
+                            <th>Прямых рефералов</th>
+                            <th>Всего в глубину</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {memberTreeData.map((node, index) => {
+                            const displayName =
+                              node && node.name
+                                ? node.name
+                                : node && node.username
+                                ? node.username
+                                : node && node.full_name
+                                ? node.full_name
+                                : node && node.phone
+                                ? node.phone
+                                : '-';
+
+                            const level =
+                              typeof node.level === 'number'
+                                ? node.level
+                                : typeof node.depth === 'number'
+                                ? node.depth
+                                : typeof node.tier === 'number'
+                                ? node.tier
+                                : 0;
+
+                            const isInfluencerNode = Boolean(
+                              node && (node.is_influencer || node.influencer)
+                            );
+
+                            const directCount =
+                              typeof node.direct_referrals_count === 'number'
+                                ? node.direct_referrals_count
+                                : typeof node.direct_children_count === 'number'
+                                ? node.direct_children_count
+                                : typeof node.direct_count === 'number'
+                                ? node.direct_count
+                                : 0;
+
+                            const totalCount =
+                              typeof node.total_descendants_count === 'number'
+                                ? node.total_descendants_count
+                                : typeof node.total_in_structure === 'number'
+                                ? node.total_in_structure
+                                : typeof node.total_count === 'number'
+                                ? node.total_count
+                                : 0;
+
+                            return (
+                              <tr key={node.id || index}>
+                                <td>{displayName}</td>
+                                <td>{level}</td>
+                                <td>{isInfluencerNode ? 'Инфлюенсер' : 'Игрок'}</td>
+                                <td>{directCount}</td>
+                                <td>{totalCount}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
+                )}
+              </div>
+
+              <div className="admin-member-section">
+                <h4 className="admin-subsection-title">Вознаграждения пользователя</h4>
+                <p className="admin-subsection-caption">
+                  Сводка бесплатных стеков и денежных выплат, начисленных выбранному
+                  пользователю по всей структуре.
+                </p>
+
+                <div className="admin-member-summary-grid">
+                  <div className="admin-member-summary-card">
+                    <div className="admin-stat-title">Бесплатные стеки</div>
+                    <div className="admin-stat-value">{memberTotalStackCount}</div>
+                    <div className="admin-stat-caption">
+                      Общее количество бесплатных стартовых стеков.
+                    </div>
+                  </div>
+
+                  <div className="admin-member-summary-card">
+                    <div className="admin-stat-title">Сумма как инфлюенсера</div>
+                    <div className="admin-stat-value">
+                      {memberTotalInfluencerAmount} <span className="admin-stat-unit">₽</span>
+                    </div>
+                    <div className="admin-stat-caption">
+                      Сумма всех денежных вознаграждений по структуре.
+                    </div>
+                  </div>
+
+                  {memberTotalFirstTournamentAmount > 0 && (
+                    <div className="admin-member-summary-card">
+                      <div className="admin-stat-title">Первые турниры</div>
+                      <div className="admin-stat-value">
+                        {memberTotalFirstTournamentAmount}{' '}
+                        <span className="admin-stat-unit">₽</span>
+                      </div>
+                      <div className="admin-stat-caption">
+                        1000 ₽ за первый турнир каждого приведённого игрока.
+                      </div>
+                    </div>
+                  )}
+
+                  {memberTotalDepositPercentAmount > 0 && (
+                    <div className="admin-member-summary-card">
+                      <div className="admin-stat-title">Процент с депозитов</div>
+                      <div className="admin-stat-value">
+                        {memberTotalDepositPercentAmount}{' '}
+                        <span className="admin-stat-unit">₽</span>
+                      </div>
+                      <div className="admin-stat-caption">
+                        10% со всех депозитов на фишки в структуре.
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {memberRewardsLoading && (
+                  <p className="admin-member-loading">
+                    Загрузка вознаграждений пользователя...
+                  </p>
+                )}
+
+                {memberRewardsError && !memberRewardsLoading && (
+                  <p className="admin-member-error">{memberRewardsError}</p>
+                )}
+
+                {!memberRewardsLoading && !memberRewardsError && (
+                  memberRewardsList.length === 0 ? (
+                    <p className="admin-member-empty">
+                      Для этого пользователя пока нет начисленных вознаграждений.
+                    </p>
+                  ) : (
+                    <div className="table-wrapper">
+                      <table className="table admin-table">
+                        <thead>
+                          <tr>
+                            <th>Дата</th>
+                            <th>Тип</th>
+                            <th>От кого</th>
+                            <th>Сумма</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {memberRewardsList.map((reward, index) => {
+                            const key = reward.id || index;
+
+                            const sourceName =
+                              reward && reward.source_member_name
+                                ? reward.source_member_name
+                                : reward && reward.source_member_full_name
+                                ? reward.source_member_full_name
+                                : reward && reward.referred_name
+                                ? reward.referred_name
+                                : '-';
+
+                            const amountRub =
+                              typeof reward.amount_rub === 'number'
+                                ? reward.amount_rub
+                                : reward && typeof reward.amount_rub === 'string'
+                                ? Number(reward.amount_rub) || 0
+                                : 0;
+
+                            const stackCount =
+                              typeof reward.stack_count === 'number'
+                                ? reward.stack_count
+                                : reward && typeof reward.stack_count === 'string'
+                                ? Number(reward.stack_count) || 0
+                                : 0;
+
+                            let amountText = '—';
+
+                            if (amountRub) {
+                              amountText = `${amountRub} ₽`;
+                            } else if (stackCount) {
+                              amountText = `${stackCount} стек(ов)`;
+                            }
+
+                            return (
+                              <tr key={key}>
+                                <td>{formatDateTime(reward.created_at || reward.date)}</td>
+                                <td>{formatRewardTypeLabel(reward.reward_type)}</td>
+                                <td>{sourceName}</td>
+                                <td>{amountText}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </section>
 
       <section className="card admin-table-card">
