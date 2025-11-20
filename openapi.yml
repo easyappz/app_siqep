@@ -24,7 +24,7 @@ paths:
   /api/auth/register/:
     post:
       operationId: auth_register_create
-      description: 'Регистрация нового пользователя по номеру телефона с опциональным реферальным кодом.'
+      description: 'Регистрация нового пользователя по номеру телефона с опциональным реферальным кодом. При регистрации с реферальным кодом всем участникам в цепочке наверх начисляется по одному бесплатному стартовому стеку.'
       tags:
         - auth
       requestBody:
@@ -97,6 +97,64 @@ paths:
                 $ref: '#/components/schemas/ProfileStats'
         '401':
           description: Требуется аутентификация
+  /api/referrals/tree/:
+    get:
+      operationId: referrals_tree_list
+      description: 'Получить дерево рефералов текущего пользователя или указанного пользователя (для админа) с глубиной и количеством потомков.'
+      tags:
+        - referrals
+      security:
+        - MemberTokenAuth: []
+      parameters:
+        - name: member_id
+          in: query
+          required: false
+          description: 'ID пользователя, для которого нужно получить дерево рефералов (доступно только администраторам).'
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 'Дерево рефералов'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReferralNode'
+        '401':
+          description: Требуется аутентификация
+        '403':
+          description: Доступ запрещён
+        '404':
+          description: Пользователь не найден
+  /api/referrals/rewards/:
+    get:
+      operationId: referrals_rewards_list
+      description: 'Получить список начисленных реферальных вознаграждений и агрегированную сводку для текущего пользователя или указанного пользователя (для админа).'\
+      tags:
+        - referrals
+      security:
+        - MemberTokenAuth: []
+      parameters:
+        - name: member_id
+          in: query
+          required: false
+          description: 'ID пользователя, для которого нужно получить реферальные вознаграждения (доступно только администраторам).'
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 'Реферальные вознаграждения и сводка'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReferralRewardsResponse'
+        '401':
+          description: Требуется аутентификация
+        '403':
+          description: Доступ запрещён
+        '404':
+          description: Пользователь не найден
   /api/admin/members/:
     get:
       operationId: admin_members_list
@@ -283,7 +341,7 @@ paths:
     post:
       operationId: admin_referrals_create
       summary: 'Админ-панель: Создать реферальное событие (депозит)'
-      description: 'Создаёт реферальное событие, фиксирующее депозит приведённого игрока (первый визит или последующие пополнения) и автоматически рассчитывает вознаграждение рефереру по правилам для обычных игроков и инфлюенсеров.'
+      description: 'Создаёт реферальное событие, фиксирующее депозит приведённого игрока (первый визит или последующие пополнения) и автоматически рассчитывает многоуровневые вознаграждения инфлюенсерам в цепочке: 1000 ₽ за первый турнир реферала и 10% со всех его дальнейших депозитов на фишки.'
       tags:
         - admin
       security:
@@ -549,6 +607,111 @@ components:
         - total_money_earned
         - history
         - registrations_chart
+    ReferralNode:
+      type: object
+      description: 'Узел дерева рефералов.'
+      properties:
+        id:
+          type: integer
+          description: 'ID участника.'
+        username:
+          type: string
+          description: 'Идентификатор участника (например, номер телефона).'
+        is_influencer:
+          type: boolean
+          description: 'Флаг, указывающий, является ли участник инфлюенсером.'
+        depth:
+          type: integer
+          description: 'Глубина в дереве относительно корневого пользователя (1 — прямой реферал).'
+        direct_referrals_count:
+          type: integer
+          description: 'Количество прямых рефералов этого участника.'
+        total_descendants_count:
+          type: integer
+          description: 'Общее количество потомков (рефералов на всех уровнях) этого участника.'
+      required:
+        - id
+        - username
+        - is_influencer
+        - depth
+        - direct_referrals_count
+        - total_descendants_count
+    ReferralReward:
+      type: object
+      description: 'Запись о начисленном реферальном вознаграждении.'
+      properties:
+        id:
+          type: integer
+          description: 'Идентификатор вознаграждения.'
+        reward_type:
+          type: string
+          description: 'Тип вознаграждения (PLAYER_STACK, INFLUENCER_FIRST_TOURNAMENT, INFLUENCER_DEPOSIT_PERCENT).'
+        amount_rub:
+          type: string
+          format: decimal
+          description: 'Сумма денежного вознаграждения в рублях (для инфлюенсеров).'
+        stack_count:
+          type: integer
+          description: 'Количество бесплатных стартовых стеков, начисленных игроку.'
+        depth:
+          type: integer
+          description: 'Глубина, на которой находится приглашённый игрок относительно получателя вознаграждения.'
+        created_at:
+          type: string
+          format: date-time
+          description: 'Дата и время начисления вознаграждения.'
+        source_member:
+          type: integer
+          description: 'ID игрока, чьё действие (регистрация/турнир/депозит) сгенерировало это вознаграждение.'
+        source_member_name:
+          type: string
+          description: 'Краткое имя или идентификатор источника вознаграждения (например, номер телефона).'
+      required:
+        - id
+        - reward_type
+        - amount_rub
+        - stack_count
+        - depth
+        - created_at
+        - source_member
+        - source_member_name
+    ReferralRewardsSummary:
+      type: object
+      description: 'Сводные данные по реферальным вознаграждениям.'
+      properties:
+        total_stack_count:
+          type: integer
+          description: 'Общее количество бесплатных стартовых стеков, начисленных пользователю.'
+        total_influencer_amount:
+          type: string
+          format: decimal
+          description: 'Общая сумма денежных вознаграждений инфлюенсеру в рублях.'
+        total_first_tournament_amount:
+          type: string
+          format: decimal
+          description: 'Суммарные выплаты за первые турниры всех рефералов.'
+        total_deposit_percent_amount:
+          type: string
+          format: decimal
+          description: 'Суммарные выплаты, рассчитанные как процент от депозитов рефералов.'
+      required:
+        - total_stack_count
+        - total_influencer_amount
+        - total_first_tournament_amount
+        - total_deposit_percent_amount
+    ReferralRewardsResponse:
+      type: object
+      description: 'Ответ с детализацией реферальных вознаграждений и агрегированной сводкой.'
+      properties:
+        rewards:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReferralReward'
+        summary:
+          $ref: '#/components/schemas/ReferralRewardsSummary'
+      required:
+        - rewards
+        - summary
     AdminMember:
       type: object
       description: 'Пользователь для отображения и управления в админ-панели.'
@@ -598,11 +761,11 @@ components:
           readOnly: true
         total_bonus_points:
           type: integer
-          description: 'Общее количество бесплатных стеков (bonus_amount), начисленных за рефералов (агрегировано по ReferralEvent).'
+          description: 'Общее количество бесплатных стеков (bonus_amount), начисленных за рефералов (агрегировано по ReferralReward и Member.total_bonus_points).'
           readOnly: true
         total_money_earned:
           type: integer
-          description: 'Общая сумма заработанных денег в рублях (агрегировано по ReferralEvent).'
+          description: 'Общая сумма заработанных денег в рублях (агрегировано по ReferralReward и Member.total_money_earned).'
           readOnly: true
       required:
         - id
@@ -707,10 +870,10 @@ components:
             - last_name
         bonus_amount:
           type: integer
-          description: 'Количество бесплатных стеков (bonus_amount), начисленных за реферала по данному событию.'
+          description: 'Количество бесплатных стеков (bonus_amount), начисленных за реферала по данному событию (для обратной совместимости, может быть 0 при использовании многоуровневой схемы).'
         money_amount:
           type: integer
-          description: 'Сумма денег в рублях, начисленная инфлюенсеру за это реферальное событие.'
+          description: 'Сумма денег в рублях, начисленная инфлюенсеру за это реферальное событие (для обратной совместимости, может быть 0 при использовании многоуровневой схемы).'
         deposit_amount:
           type: integer
           description: 'Сумма депозита в рублях за конкретное посещение / покупку фишек (один стартовый стек или ребай). Обычно стоимость одного стека составляет около 1000 ₽, но поле хранит произвольную сумму депозита.'

@@ -6,6 +6,8 @@ from .views import (
     LoginView,
     MeView,
     ProfileStatsView,
+    ReferralTreeView,
+    ReferralRewardsView,
     AdminMemberListCreateView,
     AdminMemberDetailView,
     AdminReferralEventListView,
@@ -18,6 +20,16 @@ urlpatterns = [
     path("auth/login/", LoginView.as_view(), name="login"),
     path("auth/me/", MeView.as_view(), name="me"),
     path("profile/stats/", ProfileStatsView.as_view(), name="profile-stats"),
+    path(
+        "referrals/tree/",
+        ReferralTreeView.as_view(),
+        name="referral-tree",
+    ),
+    path(
+        "referrals/rewards/",
+        ReferralRewardsView.as_view(),
+        name="referral-rewards",
+    ),
     # Admin panel endpoints
     path(
         "admin/members/",

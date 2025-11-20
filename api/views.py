@@ -1,16 +1,19 @@
 from datetime import timedelta, datetime
+from decimal import Decimal
 
 from django.utils import timezone
 from django.db.models import Count, Sum
 from django.db.models.functions import TruncDate
+from django.http import Http404
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, generics
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.exceptions import PermissionDenied
 
 from .authentication import MemberTokenAuthentication
-from .models import Member, ReferralEvent, MemberAuthToken
+from .models import Member, ReferralEvent, MemberAuthToken, ReferralReward
 from .permissions import IsAdminMember
 from .serializers import (
     MessageSerializer,
@@ -18,6 +21,9 @@ from .serializers import (
     RegistrationSerializer,
     LoginSerializer,
     ProfileStatsSerializer,
+    ReferralNodeSerializer,
+    ReferralRewardSerializer,
+    ReferralRewardsSummarySerializer,
     AdminMemberSerializer,
     AdminCreateMemberSerializer,
     ReferralEventAdminSerializer,
@@ -47,7 +53,11 @@ class RegisterView(APIView):
     @extend_schema(
         request=RegistrationSerializer,
         responses={201: MemberSerializer},
-        description="Регистрация нового пользователя по номеру телефона.",
+        description=(
+            "Регистрация нового пользователя по номеру телефона с опциональным реферальным кодом. "
+            "При регистрации с реферальным кодом всем участникам в цепочке наверх начисляется по одному "
+            "бесплатному стартовому стеку."
+        ),
     )
     def post(self, request):
         serializer = RegistrationSerializer(data=request.data)
@@ -171,6 +181,152 @@ class ProfileStatsView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+class ReferralTreeView(APIView):
+    """Return referral tree for the current member or a specified member (admin only)."""
+
+    authentication_classes = [MemberTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def _get_target_member(self, request) -> Member:
+        member: Member = request.user
+        member_id = request.query_params.get("member_id")
+        if member_id:
+            if not member.is_admin:
+                raise PermissionDenied(
+                    "Просматривать дерево рефералов других пользователей может только администратор."
+                )
+            try:
+                member_id_int = int(member_id)
+            except ValueError:
+                raise Http404("Пользователь не найден.")
+            try:
+                member = Member.objects.get(pk=member_id_int)
+            except Member.DoesNotExist:
+                raise Http404("Пользователь не найден.")
+        return member
+
+    def _count_descendants(self, member: Member) -> int:
+        """Count total descendants (on all levels) for the given member."""
+        count = 0
+        visited = set()
+        queue = list(member.referrals.all())
+        while queue:
+            current = queue.pop(0)
+            if current.id in visited:
+                continue
+            visited.add(current.id)
+            count += 1
+            queue.extend(current.referrals.all())
+        return count
+
+    def get(self, request):
+        root_member = self._get_target_member(request)
+        nodes = []
+
+        visited = set()
+        queue = [(root_member, 0)]
+        while queue:
+            current, depth = queue.pop(0)
+            for child in current.referrals.all():
+                if child.id in visited:
+                    continue
+                visited.add(child.id)
+                child_depth = depth + 1
+                node_data = {
+                    "id": child.id,
+                    "username": child.phone,
+                    "is_influencer": child.is_influencer,
+                    "depth": child_depth,
+                    "direct_referrals_count": child.referrals.count(),
+                    "total_descendants_count": self._count_descendants(child),
+                }
+                nodes.append(node_data)
+                queue.append((child, child_depth))
+
+        serializer = ReferralNodeSerializer(nodes, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class ReferralRewardsView(APIView):
+    """Return detailed referral rewards and summary for the current or specified member."""
+
+    authentication_classes = [MemberTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def _get_target_member(self, request) -> Member:
+        member: Member = request.user
+        member_id = request.query_params.get("member_id")
+        if member_id:
+            if not member.is_admin:
+                raise PermissionDenied(
+                    "Просматривать вознаграждения других пользователей может только администратор."
+                )
+            try:
+                member_id_int = int(member_id)
+            except ValueError:
+                raise Http404("Пользователь не найден.")
+            try:
+                member = Member.objects.get(pk=member_id_int)
+            except Member.DoesNotExist:
+                raise Http404("Пользователь не найден.")
+        return member
+
+    def get(self, request):
+        member = self._get_target_member(request)
+        rewards_qs = ReferralReward.objects.filter(member=member).order_by("-created_at")
+        rewards = list(rewards_qs)
+
+        rewards_serializer = ReferralRewardSerializer(rewards, many=True)
+
+        total_stack_count = sum(
+            (
+                reward.stack_count
+                for reward in rewards
+                if reward.reward_type == ReferralReward.RewardType.PLAYER_STACK
+            ),
+            0,
+        )
+
+        total_first_tournament_amount = sum(
+            (
+                reward.amount_rub
+                for reward in rewards
+                if reward.reward_type
+                == ReferralReward.RewardType.INFLUENCER_FIRST_TOURNAMENT
+            ),
+            Decimal("0.00"),
+        )
+
+        total_deposit_percent_amount = sum(
+            (
+                reward.amount_rub
+                for reward in rewards
+                if reward.reward_type
+                == ReferralReward.RewardType.INFLUENCER_DEPOSIT_PERCENT
+            ),
+            Decimal("0.00"),
+        )
+
+        total_influencer_amount = (
+            total_first_tournament_amount + total_deposit_percent_amount
+        )
+
+        summary_data = {
+            "total_stack_count": total_stack_count,
+            "total_influencer_amount": total_influencer_amount,
+            "total_first_tournament_amount": total_first_tournament_amount,
+            "total_deposit_percent_amount": total_deposit_percent_amount,
+        }
+
+        summary_serializer = ReferralRewardsSummarySerializer(summary_data)
+
+        response_data = {
+            "rewards": rewards_serializer.data,
+            "summary": summary_serializer.data,
+        }
+        return Response(response_data, status=status.HTTP_200_OK)
+
+
 # ============================
 # Admin-facing views
 # ============================
@@ -291,7 +447,7 @@ class AdminStatsOverviewView(APIView):
             for item in registrations_qs
         ]
 
-        # Top referrers
+        # Top referrers (based on ReferralEvent analytics and aggregated rewards)
         referrer_stats = (
             ReferralEvent.objects.values("referrer")
             .annotate(
@@ -317,8 +473,8 @@ class AdminStatsOverviewView(APIView):
                     "last_name": member.last_name,
                     "is_influencer": member.is_influencer,
                     "total_referrals": item["total_referrals"] or 0,
-                    "total_bonus_points": item["total_bonus_points"] or 0,
-                    "total_money_earned": item["total_money_earned"] or 0,
+                    "total_bonus_points": member.total_bonus_points,
+                    "total_money_earned": member.total_money_earned,
                 }
             )
 

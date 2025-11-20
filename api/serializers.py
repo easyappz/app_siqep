@@ -1,7 +1,11 @@
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Member, ReferralEvent
+from .models import Member, ReferralEvent, ReferralReward
+from .referral_utils import (
+    create_player_stack_rewards_for_new_member,
+    create_influencer_deposit_rewards,
+)
 
 
 class MessageSerializer(serializers.Serializer):
@@ -56,6 +60,17 @@ class RegistrationSerializer(serializers.Serializer):
     """Serializer used for public registration endpoint.
 
     Creates a new Member and optionally links it to a referrer by referral_code.
+
+    When a new member is successfully registered with a referrer, the following
+    business logic is applied:
+    - The direct referrer receives a ReferralEvent with a fixed deposit_amount
+      (1000 ₽ – стартовый стек) for backward-compatible analytics.
+    - All ancestors in the referral chain (including the direct referrer) receive
+      one free starting stack via ReferralReward with type PLAYER_STACK. This
+      works for arbitrary depth of the referral tree.
+    - Monetary rewards for influencers (1000 ₽ за первый турнир и 10% от
+      дальнейших депозитов) are created later when concrete deposit events are
+      recorded via the admin deposit endpoint.
     """
 
     first_name = serializers.CharField(max_length=100)
@@ -108,25 +123,14 @@ class RegistrationSerializer(serializers.Serializer):
         return attrs
 
     def create(self, validated_data: dict) -> Member:
-        """Создать нового участника (Member) и применить реферальную бизнес-логику.
+        """Create a new Member and apply referral business logic.
 
-        Правила на момент регистрации (первое посещение / первый стек):
-        - Всегда создаётся ReferralEvent с deposit_amount = 1000 (первый стартовый стек).
-        - Если referrer.is_influencer == False (обычный игрок клуба):
-          * он получает немонетарное вознаграждение — один бесплатный стек (1000 ₽);
-          * это отражается как bonus_amount = 1, а суммарный счётчик Member.total_bonus_points
-            увеличивается на 1;
-          * money_amount = 0.
-        - Если referrer.is_influencer == True (инфлюенсер):
-          * он получает денежное вознаграждение в размере 1000 ₽ за первое участие
-            приглашённого игрока (первый стек);
-          * это отражается как money_amount = 1000, а Member.total_money_earned
-            увеличивается на 1000;
-          * bonus_amount = 0.
-
-        В будущем для инфлюенсеров будет добавлена отдельная логика начисления 10% от
-        последующих депозитов (через отдельный эндпоинт/события). В данном методе
-        обрабатывается только первый стек при регистрации.
+        - The direct referrer receives a ReferralEvent with deposit_amount = 1000.
+        - All ancestors in the chain receive a PLAYER_STACK ReferralReward
+          (1 free starting stack) with depth starting from 1 for the direct
+          referrer, 2 for the next level, and so on.
+        - Influencer monetary rewards are generated later from concrete deposit
+          events (AdminCreateReferralEventSerializer).
         """
 
         referrer = validated_data.pop("referrer", None)
@@ -149,7 +153,7 @@ class RegistrationSerializer(serializers.Serializer):
         member.save()
 
         if referrer is not None:
-            # Защита от гипотетической саморефералки (на практике невозможна при регистрации).
+            # Safety check against hypothetical self-referral.
             if referrer.id == member.id:
                 raise serializers.ValidationError(
                     "Пользователь не может использовать собственный реферальный код."
@@ -161,15 +165,12 @@ class RegistrationSerializer(serializers.Serializer):
             deposit_amount = 1000
             if referrer.is_influencer:
                 bonus_amount = 0
-                money_amount = 1000
-                referrer.total_money_earned += money_amount
+                money_amount = deposit_amount
             else:
                 bonus_amount = 1
                 money_amount = 0
-                referrer.total_bonus_points += bonus_amount
 
-            referrer.save(update_fields=["total_bonus_points", "total_money_earned"])
-
+            # Keep ReferralEvent for analytics and backward-compatible admin views.
             ReferralEvent.objects.create(
                 referrer=referrer,
                 referred=member,
@@ -177,6 +178,9 @@ class RegistrationSerializer(serializers.Serializer):
                 money_amount=money_amount,
                 deposit_amount=deposit_amount,
             )
+
+            # New deep referral logic: stacks for all ancestors.
+            create_player_stack_rewards_for_new_member(member)
 
         return member
 
@@ -240,6 +244,57 @@ class ProfileStatsSerializer(serializers.Serializer):
     total_money_earned = serializers.IntegerField()
     history = ReferralHistoryItemSerializer(many=True)
     registrations_chart = RegistrationsChartPointSerializer(many=True)
+
+
+class ReferralNodeSerializer(serializers.Serializer):
+    """Serializer for a single node in the referral tree."""
+
+    id = serializers.IntegerField()
+    username = serializers.CharField()
+    is_influencer = serializers.BooleanField()
+    depth = serializers.IntegerField()
+    direct_referrals_count = serializers.IntegerField()
+    total_descendants_count = serializers.IntegerField()
+
+
+class ReferralRewardSerializer(serializers.ModelSerializer):
+    """Serializer for individual referral rewards."""
+
+    source_member_name = serializers.CharField(
+        source="source_member.phone",
+        read_only=True,
+    )
+
+    class Meta:
+        model = ReferralReward
+        fields = [
+            "id",
+            "reward_type",
+            "amount_rub",
+            "stack_count",
+            "depth",
+            "created_at",
+            "source_member",
+            "source_member_name",
+        ]
+
+
+class ReferralRewardsSummarySerializer(serializers.Serializer):
+    """Aggregated summary for referral rewards of a member."""
+
+    total_stack_count = serializers.IntegerField()
+    total_influencer_amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
+    total_first_tournament_amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
+    total_deposit_percent_amount = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
 
 
 # ============================
@@ -385,6 +440,11 @@ class AdminCreateReferralEventSerializer(serializers.Serializer):
 
     This serializer records a concrete deposit (stack/rebuy) for a referred member
     and applies business rules for influencers vs regular players.
+
+    For influencers in the referral chain, deep multi-level rewards are generated
+    via ReferralReward:
+    - 1000 ₽ за первый турнир реферала (тип INFLUENCER_FIRST_TOURNAMENT);
+    - 10% со всех дальнейших депозитов (тип INFLUENCER_DEPOSIT_PERCENT).
     """
 
     referred_id = serializers.IntegerField(help_text="ID приглашённого игрока (Member.id).")
@@ -433,48 +493,27 @@ class AdminCreateReferralEventSerializer(serializers.Serializer):
         referred: Member = validated_data["referred"]
         referrer: Member = referred.referred_by
 
-        has_existing_events = ReferralEvent.objects.filter(
-            referrer=referrer,
-            referred=referred,
-        ).exists()
-
         deposit_amount: int = validated_data["deposit_amount"]
         created_at = validated_data.get("created_at") or timezone.now()
 
-        # Default values; adjusted below depending on business rules.
-        bonus_amount = 0
-        money_amount = 0
-
-        if referrer.is_influencer:
-            # Инфлюенсер: за первый стек получает 100% депозита, за последующие — 10%.
-            if not has_existing_events:
-                money_amount = deposit_amount
-            else:
-                # Для последующих депозитов берём 10% от суммы депозита.
-                # Используется целочисленное усечение (int), чтобы всегда хранить целые рубли.
-                money_amount = int(deposit_amount * 0.10)
-
-            # Бонусные стеки для инфлюенсеров не начисляются.
-            bonus_amount = 0
-
-            referrer.total_money_earned += money_amount
-            referrer.save(update_fields=["total_money_earned"])
-        else:
-            # Обычный игрок клуба: бесплатный стек за приглашение нового игрока уже
-            # был выдан при регистрации (bonus_amount = 1). Дополнительные депозитные
-            # события, которые создаёт администратор, используются только для аналитики
-            # (учёт deposit_amount) и не приносят дополнительных бонусов или денег.
-            bonus_amount = 0
-            money_amount = 0
-
+        # For analytics and compatibility we still store a ReferralEvent record,
+        # but all deep influencer rewards are handled by ReferralReward.
         event = ReferralEvent.objects.create(
             referrer=referrer,
             referred=referred,
-            bonus_amount=bonus_amount,
-            money_amount=money_amount,
+            bonus_amount=0,
+            money_amount=0,
             deposit_amount=deposit_amount,
             created_at=created_at,
         )
+
+        # Deep influencer rewards (first tournament + 10% of further deposits).
+        create_influencer_deposit_rewards(
+            source_member=referred,
+            deposit_amount=deposit_amount,
+            event_time=created_at,
+        )
+
         return event
 
 

@@ -1,7 +1,9 @@
 import secrets
+from decimal import Decimal
 
 from django.contrib.auth.hashers import check_password, make_password
 from django.db import models
+from django.utils import timezone
 
 
 class Member(models.Model):
@@ -32,6 +34,11 @@ class Member(models.Model):
     total_money_earned = models.IntegerField(
         default=0,
         help_text="Total money earned in rubles.",
+    )
+    influencer_since = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Date and time when the member became an influencer.",
     )
 
     class Meta:
@@ -69,9 +76,32 @@ class Member(models.Model):
         return f"REF{self.pk}{random_suffix}"
 
     def save(self, *args, **kwargs) -> None:
-        """Ensure a referral_code is generated on first save."""
+        """Ensure a referral_code is generated on first save and influencer_since is set correctly."""
         is_new = self.pk is None
+
+        previous = None
+        if not is_new:
+            try:
+                previous = Member.objects.get(pk=self.pk)
+            except Member.DoesNotExist:
+                previous = None
+
+        # Set influencer_since only when a member becomes an influencer
+        if is_new:
+            if self.is_influencer and self.influencer_since is None:
+                self.influencer_since = timezone.now()
+        else:
+            if (
+                previous is not None
+                and not previous.is_influencer
+                and self.is_influencer
+                and self.influencer_since is None
+            ):
+                self.influencer_since = timezone.now()
+
         super().save(*args, **kwargs)
+
+        # Generate referral code only once after primary key is available
         if is_new and not self.referral_code:
             self.referral_code = self.generate_referral_code()
             super().save(update_fields=["referral_code"])
@@ -88,7 +118,6 @@ class ReferralEvent(models.Model):
         Member,
         on_delete=models.CASCADE,
         related_name="referred_event",
-        unique=True,
     )
     created_at = models.DateTimeField(auto_now_add=True)
     bonus_amount = models.IntegerField(default=0)
@@ -106,6 +135,49 @@ class ReferralEvent(models.Model):
 
     def __str__(self) -> str:
         return f"Referral from {self.referrer} to {self.referred}"
+
+
+class ReferralReward(models.Model):
+    class RewardType(models.TextChoices):
+        PLAYER_STACK = "PLAYER_STACK", "Player Stack"
+        INFLUENCER_FIRST_TOURNAMENT = (
+            "INFLUENCER_FIRST_TOURNAMENT",
+            "Influencer First Tournament",
+        )
+        INFLUENCER_DEPOSIT_PERCENT = (
+            "INFLUENCER_DEPOSIT_PERCENT",
+            "Influencer Deposit Percent",
+        )
+
+    id = models.AutoField(primary_key=True)
+    member = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="rewards",
+    )
+    source_member = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="generated_rewards",
+    )
+    reward_type = models.CharField(
+        max_length=64,
+        choices=RewardType.choices,
+    )
+    amount_rub = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    stack_count = models.IntegerField(default=0)
+    depth = models.IntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"Reward {self.reward_type} for {self.member_id} from {self.source_member_id}"
 
 
 class MemberAuthToken(models.Model):
