@@ -295,7 +295,7 @@ const AdminUsersPage = () => {
                   <th>Фамилия</th>
                   <th>Телефон</th>
                   <th>Email</th>
-                  <th>Тип аккаунта</th>
+                  <th>Статус</th>
                   <th>Роль</th>
                   <th>Кол-во рефералов</th>
                   <th>Бонусы</th>
@@ -319,7 +319,7 @@ const AdminUsersPage = () => {
                     <td>{member.last_name}</td>
                     <td>{member.phone}</td>
                     <td>{member.email || '—'}</td>
-                    <td>{member.is_influencer ? 'Инфлюенсер' : 'Обычный'}</td>
+                    <td>{member.is_influencer ? 'Инфлюенсер' : 'Игрок'}</td>
                     <td>{member.is_admin ? 'Админ' : 'Пользователь'}</td>
                     <td>{member.total_referrals}</td>
                     <td>{member.total_bonus_points}</td>

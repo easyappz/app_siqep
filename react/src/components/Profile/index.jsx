@@ -82,7 +82,7 @@ const ProfilePage = () => {
       : '';
 
   const accountTypeLabel =
-    member && member.is_influencer ? 'Инфлюенсер' : 'Обычный пользователь';
+    member && member.is_influencer ? 'Инфлюенсер' : 'Игрок';
 
   const totalReferrals =
     stats && typeof stats.total_referrals !== 'undefined' ? stats.total_referrals : 0;
@@ -156,7 +156,7 @@ const ProfilePage = () => {
 
               <div className="profile-info-column">
                 <div className="profile-info-row">
-                  <div className="profile-label">Тип аккаунта</div>
+                  <div className="profile-label">Статус</div>
                   <div className="profile-tag">{accountTypeLabel}</div>
                 </div>
                 {referralCode && (
