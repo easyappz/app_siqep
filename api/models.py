@@ -6,14 +6,79 @@ from django.db import models
 from django.utils import timezone
 
 
+# Referral and rank constants
+MAX_REFERRAL_DEPTH = 10
+
+PLAYER_DIRECT_REFERRAL_BONUS_VCOINS = Decimal("1000")
+PLAYER_DEPTH_BASE_BONUS_VCOINS = Decimal("100")
+
+INFLUENCER_DIRECT_REFERRAL_BONUS_CASH = Decimal("500")
+INFLUENCER_DEPTH_BASE_BONUS_CASH = Decimal("50")
+
+INFLUENCER_DEPOSIT_PERCENT = Decimal("0.10")
+
+USER_TYPE_PLAYER = "player"
+USER_TYPE_INFLUENCER = "influencer"
+
+USER_TYPE_CHOICES = (
+    (USER_TYPE_PLAYER, "Player"),
+    (USER_TYPE_INFLUENCER, "Influencer"),
+)
+
+RANK_STANDARD = "standard"
+RANK_SILVER = "silver"
+RANK_GOLD = "gold"
+RANK_PLATINUM = "platinum"
+
+RANK_CHOICES = (
+    (RANK_STANDARD, "Standard"),
+    (RANK_SILVER, "Silver"),
+    (RANK_GOLD, "Gold"),
+    (RANK_PLATINUM, "Platinum"),
+)
+
+
 class Member(models.Model):
     id = models.AutoField(primary_key=True)
     first_name = models.CharField(max_length=100)
     last_name = models.CharField(max_length=100)
     phone = models.CharField(max_length=32, unique=True)
     email = models.EmailField(unique=True, null=True, blank=True)
+
+    # Flags used by existing logic
     is_influencer = models.BooleanField(default=False)
     is_admin = models.BooleanField(default=False)
+
+    # Ranked referral system fields
+    referrer = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="direct_referrals",
+    )
+    user_type = models.CharField(
+        max_length=20,
+        choices=USER_TYPE_CHOICES,
+        default=USER_TYPE_PLAYER,
+    )
+    rank = models.CharField(
+        max_length=20,
+        choices=RANK_CHOICES,
+        default=RANK_STANDARD,
+    )
+    v_coins_balance = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    cash_balance = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+
+    # Legacy referral fields kept for backward compatibility
     referral_code = models.CharField(
         max_length=32,
         unique=True,
@@ -28,6 +93,7 @@ class Member(models.Model):
         blank=True,
         related_name="referrals",
     )
+
     created_at = models.DateTimeField(auto_now_add=True)
     password_hash = models.CharField(max_length=128)
     total_bonus_points = models.IntegerField(default=0)
@@ -54,6 +120,14 @@ class Member(models.Model):
     @property
     def is_anonymous(self) -> bool:
         return False
+
+    @property
+    def is_player(self) -> bool:
+        return self.user_type == USER_TYPE_PLAYER
+
+    @property
+    def is_influencer_user_type(self) -> bool:
+        return self.user_type == USER_TYPE_INFLUENCER
 
     def set_password(self, raw_password: str) -> None:
         """Hash and store the given raw password."""
@@ -178,6 +252,52 @@ class ReferralReward(models.Model):
 
     def __str__(self) -> str:
         return f"Reward {self.reward_type} for {self.member_id} from {self.source_member_id}"
+
+
+class ReferralRelation(models.Model):
+    id = models.AutoField(primary_key=True)
+    ancestor = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="referral_descendants",
+    )
+    descendant = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="referral_ancestors",
+    )
+    level = models.PositiveIntegerField()
+    has_paid_first_bonus = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = ("ancestor", "descendant")
+        ordering = ["ancestor_id", "level"]
+
+    def __str__(self) -> str:
+        return f"Relation anc={self.ancestor_id} desc={self.descendant_id} lvl={self.level}"
+
+
+class RankRule(models.Model):
+    rank = models.CharField(
+        primary_key=True,
+        max_length=20,
+        choices=RANK_CHOICES,
+    )
+    required_referrals = models.PositiveIntegerField()
+    player_depth_bonus_multiplier = models.DecimalField(
+        max_digits=4,
+        decimal_places=2,
+    )
+    influencer_depth_bonus_multiplier = models.DecimalField(
+        max_digits=4,
+        decimal_places=2,
+    )
+
+    class Meta:
+        ordering = ["required_referrals"]
+
+    def __str__(self) -> str:
+        return f"RankRule {self.rank} (required={self.required_referrals})"
 
 
 class MemberAuthToken(models.Model):

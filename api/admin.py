@@ -1,6 +1,12 @@
 from django.contrib import admin
 
-from .models import Member, ReferralEvent, MemberAuthToken
+from .models import (
+    Member,
+    ReferralEvent,
+    MemberAuthToken,
+    ReferralRelation,
+    RankRule,
+)
 
 
 @admin.register(Member)
@@ -11,14 +17,32 @@ class MemberAdmin(admin.ModelAdmin):
         "last_name",
         "phone",
         "email",
+        "user_type",
+        "rank",
         "is_influencer",
         "is_admin",
+        "referrer",
         "referred_by",
+        "v_coins_balance",
+        "cash_balance",
+        "influencer_since",
         "created_at",
     )
-    list_filter = ("is_influencer", "is_admin", "created_at")
+    list_filter = (
+        "user_type",
+        "rank",
+        "is_influencer",
+        "is_admin",
+        "created_at",
+    )
     search_fields = ("first_name", "last_name", "phone", "email")
-    readonly_fields = ("referral_code", "created_at", "total_bonus_points", "total_money_earned")
+    readonly_fields = (
+        "referral_code",
+        "created_at",
+        "total_bonus_points",
+        "total_money_earned",
+        "influencer_since",
+    )
     ordering = ("-created_at",)
 
 
@@ -58,3 +82,36 @@ class MemberAuthTokenAdmin(admin.ModelAdmin):
         return f"{obj.key[:8]}..."
 
     short_key.short_description = "Key"
+
+
+@admin.register(ReferralRelation)
+class ReferralRelationAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "ancestor",
+        "descendant",
+        "level",
+        "has_paid_first_bonus",
+    )
+    list_filter = ("level", "has_paid_first_bonus")
+    search_fields = (
+        "ancestor__first_name",
+        "ancestor__last_name",
+        "ancestor__phone",
+        "descendant__first_name",
+        "descendant__last_name",
+        "descendant__phone",
+    )
+    ordering = ("ancestor_id", "level")
+
+
+@admin.register(RankRule)
+class RankRuleAdmin(admin.ModelAdmin):
+    list_display = (
+        "rank",
+        "required_referrals",
+        "player_depth_bonus_multiplier",
+        "influencer_depth_bonus_multiplier",
+    )
+    search_fields = ("rank",)
+    ordering = ("required_referrals",)
