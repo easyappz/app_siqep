@@ -13,6 +13,7 @@ import {
 import { AuthContext, useAuth } from '../../context/AuthContext';
 import { getProfile, fetchProfileStats, updateProfile } from '../../api/profile';
 import { fetchReferralTree, fetchReferralRewards } from '../../api/referrals';
+import { createWithdrawalRequest, getMyWithdrawalRequests } from '../../api/withdrawals';
 
 function getUserTypeFromMember(member) {
   if (!member) {
@@ -55,7 +56,6 @@ function getPlayerRewardDescription(rankLabel, currentRankRule) {
     ? Number(currentRankRule.player_depth_bonus_multiplier || 1)
     : 1;
 
-  const baseDirect = 1000;
   const baseDepth = 100;
   const depthBonus = baseDepth * multiplier;
 
@@ -114,6 +114,16 @@ const ProfilePage = () => {
   const [payoutError, setPayoutError] = useState('');
   const [payoutSuccess, setPayoutSuccess] = useState('');
 
+  const [withdrawalMethod, setWithdrawalMethod] = useState('card');
+  const [withdrawalDestination, setWithdrawalDestination] = useState('');
+  const [withdrawalAmount, setWithdrawalAmount] = useState('');
+  const [isSubmittingWithdrawal, setIsSubmittingWithdrawal] = useState(false);
+  const [withdrawalError, setWithdrawalError] = useState('');
+  const [withdrawalSuccess, setWithdrawalSuccess] = useState('');
+  const [withdrawals, setWithdrawals] = useState([]);
+  const [isLoadingWithdrawals, setIsLoadingWithdrawals] = useState(false);
+  const [withdrawalsError, setWithdrawalsError] = useState('');
+
   const handleCopyLink = async (link) => {
     if (!link) {
       return;
@@ -146,9 +156,9 @@ const ProfilePage = () => {
       const data = await getProfile();
       setProfileData(data || null);
     } catch (err) {
-      const status = err && err.response ? err.response.status : null;
+      const statusCode = err && err.response ? err.response.status : null;
 
-      if (status === 401) {
+      if (statusCode === 401) {
         logout();
         navigate('/login', { replace: true });
       }
@@ -165,9 +175,9 @@ const ProfilePage = () => {
       const data = await fetchProfileStats();
       setStats(data || null);
     } catch (err) {
-      const status = err && err.response ? err.response.status : null;
+      const statusCode = err && err.response ? err.response.status : null;
 
-      if (status === 401) {
+      if (statusCode === 401) {
         logout();
         navigate('/login', { replace: true });
         return;
@@ -192,9 +202,9 @@ const ProfilePage = () => {
         : [];
       setTreeData(nodes);
     } catch (err) {
-      const status = err && err.response ? err.response.status : null;
+      const statusCode = err && err.response ? err.response.status : null;
 
-      if (status === 401) {
+      if (statusCode === 401) {
         logout();
         navigate('/login', { replace: true });
         return;
@@ -214,9 +224,9 @@ const ProfilePage = () => {
       const data = await fetchReferralRewards();
       setRewardsData(data || null);
     } catch (err) {
-      const status = err && err.response ? err.response.status : null;
+      const statusCode = err && err.response ? err.response.status : null;
 
-      if (status === 401) {
+      if (statusCode === 401) {
         logout();
         navigate('/login', { replace: true });
         return;
@@ -225,6 +235,29 @@ const ProfilePage = () => {
       setRewardsError('Не удалось загрузить вознаграждения. Попробуйте позже.');
     } finally {
       setIsLoadingRewards(false);
+    }
+  }, [logout, navigate]);
+
+  const loadWithdrawals = useCallback(async () => {
+    setIsLoadingWithdrawals(true);
+    setWithdrawalsError('');
+
+    try {
+      const data = await getMyWithdrawalRequests();
+      const list = Array.isArray(data) ? data : [];
+      setWithdrawals(list);
+    } catch (err) {
+      const statusCode = err && err.response ? err.response.status : null;
+
+      if (statusCode === 401) {
+        logout();
+        navigate('/login', { replace: true });
+        return;
+      }
+
+      setWithdrawalsError('Не удалось загрузить заявки на вывод. Попробуйте позже.');
+    } finally {
+      setIsLoadingWithdrawals(false);
     }
   }, [logout, navigate]);
 
@@ -246,6 +279,20 @@ const ProfilePage = () => {
   }, [profileData]);
 
   const profileUser = profileData || member || null;
+
+  useEffect(() => {
+    if (!profileUser) {
+      return;
+    }
+
+    const userType = getUserTypeFromMember(profileUser);
+    const influencerFlag =
+      userType === 'influencer' || Boolean(profileUser.is_influencer);
+
+    if (influencerFlag) {
+      loadWithdrawals();
+    }
+  }, [profileUser, loadWithdrawals]);
 
   const backendUserType = getUserTypeFromMember(profileUser);
   const accountTypeLabel = getUserTypeLabel(backendUserType);
@@ -359,6 +406,8 @@ const ProfilePage = () => {
       ? profileUser.total_influencer_earnings
       : '0.00';
 
+  const displayedInfluencerEarnings = totalInfluencerEarningsValue || '0.00';
+
   const isInfluencerProfile =
     backendUserType === 'influencer' ||
     Boolean(profileUser && profileUser.is_influencer) ||
@@ -395,9 +444,9 @@ const ProfilePage = () => {
 
       setPayoutSuccess('Реквизиты для вывода успешно сохранены.');
     } catch (err) {
-      const status = err && err.response ? err.response.status : null;
+      const statusCode = err && err.response ? err.response.status : null;
 
-      if (status === 401) {
+      if (statusCode === 401) {
         logout();
         navigate('/login', { replace: true });
         return;
@@ -417,6 +466,68 @@ const ProfilePage = () => {
       setPayoutError(message);
     } finally {
       setIsSavingPayout(false);
+    }
+  };
+
+  const handleSubmitWithdrawal = async (event) => {
+    if (event && event.preventDefault) {
+      event.preventDefault();
+    }
+
+    setWithdrawalError('');
+    setWithdrawalSuccess('');
+
+    const amountNumber = Number(withdrawalAmount);
+
+    if (!withdrawalAmount || Number.isNaN(amountNumber) || amountNumber <= 0) {
+      setWithdrawalError('Укажите корректную сумму для вывода больше 0.');
+      return;
+    }
+
+    if (!withdrawalDestination) {
+      setWithdrawalError('Укажите реквизиты для вывода (номер карты или адрес кошелька).');
+      return;
+    }
+
+    setIsSubmittingWithdrawal(true);
+
+    try {
+      const payload = {
+        amount: amountNumber,
+        method: withdrawalMethod,
+        destination: withdrawalDestination,
+      };
+
+      await createWithdrawalRequest(payload);
+
+      setWithdrawalSuccess('Заявка на вывод успешно отправлена.');
+      setWithdrawalAmount('');
+      setWithdrawalDestination('');
+
+      await loadWithdrawals();
+    } catch (err) {
+      const statusCode = err && err.response ? err.response.status : null;
+
+      if (statusCode === 401) {
+        logout();
+        navigate('/login', { replace: true });
+        return;
+      }
+
+      let message = 'Не удалось отправить заявку на вывод. Попробуйте ещё раз.';
+
+      if (err && err.response && err.response.data) {
+        const data = err.response.data;
+        if (typeof data.detail === 'string') {
+          message = data.detail;
+        } else if (typeof data.amount === 'string') {
+          message = data.amount;
+        }
+      }
+
+      setWithdrawalError(message);
+    } finally {
+      setIsSubmittingWithdrawal(false);
     }
   };
 
@@ -466,6 +577,32 @@ const ProfilePage = () => {
     }
 
     return `${count} стеков`;
+  };
+
+  const formatWithdrawalMethodLabel = (method) => {
+    if (method === 'crypto') {
+      return 'Криптокошелёк';
+    }
+    if (method === 'card') {
+      return 'Банковская карта';
+    }
+    return 'Способ вывода';
+  };
+
+  const formatWithdrawalStatusLabel = (status) => {
+    if (status === 'pending') {
+      return 'В обработке';
+    }
+    if (status === 'approved') {
+      return 'Одобрена';
+    }
+    if (status === 'rejected') {
+      return 'Отклонена';
+    }
+    if (status === 'paid') {
+      return 'Выплачена';
+    }
+    return 'Статус неизвестен';
   };
 
   const rewardDescriptionLines =
@@ -628,20 +765,20 @@ const ProfilePage = () => {
           <section className="card profile-influencer-earnings-card">
             <h2 className="profile-section-title">Заработано как инфлюенсер</h2>
             <p className="profile-section-text">
-              Суммарный заработок по инфлюенсерской программе: бонусы за первые турниры
-              ваших рефералов и процент с их депозитов на фишки.
+              Общая сумма заработка от депозитов и активности приглашённых вами игроков во
+              всей структуре.
             </p>
 
             <div className="profile-balance-grid">
-              <div className="profile-balance-card">
-                <div className="profile-label">Всего заработано</div>
-                <div className="profile-balance-value">
-                  {`${totalInfluencerEarningsValue} ₽`}
+              <div className="profile-balance-card profile-balance-card-accent">
+                <div className="profile-label">Заработано денег</div>
+                <div className="profile-balance-value profile-balance-value-large">
+                  {`${displayedInfluencerEarnings} ₽`}
                 </div>
                 <div className="profile-stat-caption">
-                  Включает все денежные вознаграждения за рефералов, в том числе
-                  демонстрационные депозиты игроков Амир и Альфира, если они были
-                  смоделированы в системе.
+                  Сюда входят бонусы за первые турниры и процент с депозитов ваших рефералов,
+                  включая демонстрационные депозиты (например, 2000 ₽ для игроков Амир и
+                  Альфира), если они были созданы в системе.
                 </div>
               </div>
             </div>
@@ -710,6 +847,159 @@ const ProfilePage = () => {
           </section>
         )}
 
+        {backendUserType === 'influencer' && (
+          <section className="card profile-withdraw-card">
+            <h2 className="profile-section-title">Вывести деньги</h2>
+            <p className="profile-section-text">
+              Оформите заявку на вывод части заработанных средств на банковскую карту или
+              криптокошелёк. Максимальная сумма зависит от доступного для вывода баланса.
+            </p>
+
+            <form className="profile-payout-form" onSubmit={handleSubmitWithdrawal}>
+              <div className="profile-form-row">
+                <div className="profile-label">Способ вывода</div>
+                <div className="profile-radio-group">
+                  <label className="profile-radio-item">
+                    <input
+                      type="radio"
+                      name="withdrawMethod"
+                      value="card"
+                      checked={withdrawalMethod === 'card'}
+                      onChange={() => setWithdrawalMethod('card')}
+                    />
+                    <span>Банковская карта</span>
+                  </label>
+                  <label className="profile-radio-item">
+                    <input
+                      type="radio"
+                      name="withdrawMethod"
+                      value="crypto"
+                      checked={withdrawalMethod === 'crypto'}
+                      onChange={() => setWithdrawalMethod('crypto')}
+                    />
+                    <span>Криптокошелёк</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="profile-form-row">
+                <label className="profile-label" htmlFor="withdrawDestination">
+                  Реквизиты для вывода
+                </label>
+                <input
+                  id="withdrawDestination"
+                  type="text"
+                  className="profile-input"
+                  value={withdrawalDestination}
+                  onChange={(event) => setWithdrawalDestination(event.target.value)}
+                  placeholder={
+                    withdrawalMethod === 'crypto'
+                      ? 'Адрес криптокошелька'
+                      : 'Номер банковской карты'
+                  }
+                />
+              </div>
+
+              <div className="profile-form-row">
+                <label className="profile-label" htmlFor="withdrawAmount">
+                  Сумма для вывода (₽)
+                </label>
+                <input
+                  id="withdrawAmount"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  className="profile-input"
+                  value={withdrawalAmount}
+                  onChange={(event) => setWithdrawalAmount(event.target.value)}
+                  placeholder="Например: 1000"
+                />
+              </div>
+
+              {withdrawalError && (
+                <div className="profile-status-message profile-status-error">
+                  {withdrawalError}
+                </div>
+              )}
+
+              {withdrawalSuccess && (
+                <div className="profile-status-message profile-status-success">
+                  {withdrawalSuccess}
+                </div>
+              )}
+
+              <div className="profile-form-actions">
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={isSubmittingWithdrawal}
+                >
+                  {isSubmittingWithdrawal ? 'Отправка...' : 'Отправить заявку'}
+                </button>
+              </div>
+            </form>
+
+            <div className="profile-withdraw-history">
+              <h3 className="profile-section-subtitle">История заявок на вывод</h3>
+
+              {isLoadingWithdrawals && (
+                <div className="profile-status-message">Загрузка заявок...</div>
+              )}
+
+              {withdrawalsError && !isLoadingWithdrawals && (
+                <div className="profile-status-message profile-status-error">
+                  {withdrawalsError}
+                </div>
+              )}
+
+              {!isLoadingWithdrawals && !withdrawalsError && (
+                withdrawals.length === 0 ? (
+                  <div className="profile-withdraw-empty">
+                    Заявок на вывод пока нет.
+                  </div>
+                ) : (
+                  <div className="profile-withdraw-table-wrapper">
+                    <table className="profile-withdraw-table">
+                      <thead>
+                        <tr>
+                          <th>Сумма</th>
+                          <th>Метод</th>
+                          <th>Реквизиты</th>
+                          <th>Статус</th>
+                          <th>Дата</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {withdrawals.map((item, index) => {
+                          const key = item.id || index;
+                          const amountText =
+                            typeof item.amount === 'number' || typeof item.amount === 'string'
+                              ? `${item.amount} ₽`
+                              : '—';
+
+                          const methodLabel = formatWithdrawalMethodLabel(item.method);
+                          const statusLabel = formatWithdrawalStatusLabel(item.status);
+                          const dateText = formatRewardDateTime(item.created_at);
+
+                          return (
+                            <tr key={key}>
+                              <td>{amountText}</td>
+                              <td>{methodLabel}</td>
+                              <td>{item.destination || '—'}</td>
+                              <td>{statusLabel}</td>
+                              <td>{dateText}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              )}
+            </div>
+          </section>
+        )}
+
         {loading && (
           <div className="profile-status-message">Загрузка статистики...</div>
         )}
@@ -763,7 +1053,7 @@ const ProfilePage = () => {
                 <div className="profile-stat-label">Заработано денег</div>
                 <div className="profile-stat-value">{`${totalMoneyEarned} ₽`}</div>
                 <div className="profile-stat-caption">
-                  500 ₽ за первого турнира прямых рефералов + 10% с последующих депозитов на
+                  500 ₽ за первый турнир прямых рефералов + 10% с последующих депозитов на
                   фишки по вашей структуре, с учётом глубинного кэшбэка по рангу.
                 </div>
               </div>
