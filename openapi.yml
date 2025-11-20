@@ -24,7 +24,7 @@ paths:
   /api/auth/register/:
     post:
       operationId: auth_register_create
-      description: 'Регистрация нового пользователя по номеру телефона с опциональным реферальным кодом. При регистрации с реферальным кодом всем участникам в цепочке наверх начисляется по одному бесплатному стартовому стеку.'
+      description: 'Регистрация нового пользователя по номеру телефона с опциональным реферальным кодом. При наличии реферального кода создаются связи в ранговой реферальной системе, а финансовые бонусы начисляются после первого турнира/депозита нового игрока.'
       tags:
         - auth
       requestBody:
@@ -100,7 +100,7 @@ paths:
   /api/referrals/tree/:
     get:
       operationId: referrals_tree_list
-      description: 'Получить дерево рефералов текущего пользователя или указанного пользователя (для админа) с глубиной и количеством потомков.'
+      description: 'Получить дерево рефералов текущего пользователя (основанное на ReferralRelation) с указанием глубины, ранга и статуса активации каждого реферала.'
       tags:
         - referrals
       security:
@@ -130,7 +130,7 @@ paths:
   /api/referrals/rewards/:
     get:
       operationId: referrals_rewards_list
-      description: 'Получить список начисленных реферальных вознаграждений и агрегированную сводку для текущего пользователя или указанного пользователя (для админа).'\
+      description: 'Получить список начисленных реферальных вознаграждений и агрегированную сводку для текущего пользователя или указанного пользователя (для админа).'
       tags:
         - referrals
       security:
@@ -341,7 +341,7 @@ paths:
     post:
       operationId: admin_referrals_create
       summary: 'Админ-панель: Создать реферальное событие (депозит)'
-      description: 'Создаёт реферальное событие, фиксирующее депозит приведённого игрока (первый визит или последующие пополнения) и автоматически рассчитывает многоуровневые вознаграждения инфлюенсерам в цепочке: 1000 ₽ за первый турнир реферала и 10% со всех его дальнейших депозитов на фишки.'
+      description: 'Создаёт реферальное событие, фиксирующее депозит приведённого игрока (первый визит или последующие пополнения) и автоматически рассчитывает многоуровневые вознаграждения по ранговой системе: бонус за первый турнир/депозит и 10% со всех дальнейших депозитов для инфлюенсеров.'
       tags:
         - admin
       security:
@@ -423,7 +423,7 @@ components:
         - referral_code
     Member:
       type: object
-      description: 'Пользователь сервиса (Member).'
+      description: 'Пользователь сервиса (Member) с полями ранговой реферальной системы.'
       properties:
         id:
           type: integer
@@ -444,7 +444,7 @@ components:
           description: 'Электронная почта пользователя.'
         is_influencer:
           type: boolean
-          description: 'Является ли пользователь инфлюенсером.'
+          description: 'Является ли пользователь инфлюенсером (legacy-флаг).'
         is_admin:
           type: boolean
           description: 'Является ли пользователь администратором.'
@@ -460,6 +460,39 @@ components:
           type: string
           format: date-time
           description: 'Дата и время регистрации пользователя.'
+        user_type:
+          type: string
+          description: 'Тип пользователя в ранговой системе: "player" (игрок) или "influencer" (инфлюенсер).'
+          enum:
+            - player
+            - influencer
+        rank:
+          type: string
+          description: 'Текущий ранг пользователя в реферальной программе.'
+          enum:
+            - standard
+            - silver
+            - gold
+            - platinum
+        v_coins_balance:
+          type: string
+          format: decimal
+          description: 'Баланс виртуальных фишек (V-Coins) пользователя.'
+        cash_balance:
+          type: string
+          format: decimal
+          description: 'Баланс денежных средств (в рублях) для инфлюенсеров.'
+        direct_referrals_count:
+          type: integer
+          description: 'Количество прямых рефералов (уровень 1) в ранговой системе (основано на ReferralRelation).'
+        active_direct_referrals_count:
+          type: integer
+          description: 'Количество активных прямых рефералов (уровень 1), для которых уже начислен бонус за первый турнир/депозит.'
+        current_rank_rule:
+          allOf:
+            - $ref: '#/components/schemas/RankRuleSummary'
+          nullable: true
+          description: 'Порог и множители глубинного кэшбэка для текущего ранга пользователя.'
       required:
         - id
         - first_name
@@ -469,6 +502,31 @@ components:
         - is_admin
         - referral_code
         - created_at
+        - user_type
+        - rank
+        - v_coins_balance
+        - cash_balance
+        - direct_referrals_count
+        - active_direct_referrals_count
+    RankRuleSummary:
+      type: object
+      description: 'Правило ранга: порог активных рефералов и множители глубинного бонуса.'
+      properties:
+        required_referrals:
+          type: integer
+          description: 'Количество активных рефералов 1-го уровня, необходимых для достижения ранга.'
+        player_depth_bonus_multiplier:
+          type: string
+          format: decimal
+          description: 'Множитель глубинного кэшбэка для игроков (V-Coins) для данного ранга.'
+        influencer_depth_bonus_multiplier:
+          type: string
+          format: decimal
+          description: 'Множитель глубинного кэшбэка для инфлюенсеров (рубли) для данного ранга.'
+      required:
+        - required_referrals
+        - player_depth_bonus_multiplier
+        - influencer_depth_bonus_multiplier
     RegistrationRequest:
       type: object
       description: 'Данные для регистрации нового пользователя.'
@@ -609,33 +667,45 @@ components:
         - registrations_chart
     ReferralNode:
       type: object
-      description: 'Узел дерева рефералов.'
+      description: 'Элемент дерева рефералов, основанный на связях ReferralRelation.'
       properties:
-        id:
+        descendant_id:
           type: integer
-          description: 'ID участника.'
+          description: 'ID потомка (реферала) в дереве.'
+        level:
+          type: integer
+          description: 'Уровень глубины относительно текущего пользователя (1 — прямой реферал).'
+        has_paid_first_bonus:
+          type: boolean
+          description: 'Флаг, показывающий, был ли уже выплачен однократный бонус за первый турнир/депозит для пары ancestor/descendant.'
         username:
           type: string
-          description: 'Идентификатор участника (например, номер телефона).'
-        is_influencer:
+          description: 'Идентификатор участника (обычно номер телефона).'
+        user_type:
+          type: string
+          description: 'Тип пользователя: "player" или "influencer".'
+          enum:
+            - player
+            - influencer
+        rank:
+          type: string
+          description: 'Ранг участника в реферальной программе.'
+          enum:
+            - standard
+            - silver
+            - gold
+            - platinum
+        is_active_referral:
           type: boolean
-          description: 'Флаг, указывающий, является ли участник инфлюенсером.'
-        depth:
-          type: integer
-          description: 'Глубина в дереве относительно корневого пользователя (1 — прямой реферал).'
-        direct_referrals_count:
-          type: integer
-          description: 'Количество прямых рефералов этого участника.'
-        total_descendants_count:
-          type: integer
-          description: 'Общее количество потомков (рефералов на всех уровнях) этого участника.'
+          description: 'Флаг, показывающий, считается ли реферал активным (для текущей реализации — совпадает с has_paid_first_bonus).'
       required:
-        - id
+        - descendant_id
+        - level
+        - has_paid_first_bonus
         - username
-        - is_influencer
-        - depth
-        - direct_referrals_count
-        - total_descendants_count
+        - user_type
+        - rank
+        - is_active_referral
     ReferralReward:
       type: object
       description: 'Запись о начисленном реферальном вознаграждении.'

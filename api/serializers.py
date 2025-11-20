@@ -1,7 +1,7 @@
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Member, ReferralEvent, ReferralReward, ReferralRelation
+from .models import Member, ReferralEvent, ReferralReward, ReferralRelation, RankRule
 from .referral_utils import (
     on_new_user_registered,
     on_user_first_tournament_completed,
@@ -29,9 +29,12 @@ class MemberReferrerSerializer(serializers.ModelSerializer):
 
 
 class MemberSerializer(serializers.ModelSerializer):
-    """Serializer for public member profile data."""
+    """Serializer for public member profile data with ranked referral fields."""
 
     referred_by = MemberReferrerSerializer(read_only=True)
+    direct_referrals_count = serializers.SerializerMethodField()
+    active_direct_referrals_count = serializers.SerializerMethodField()
+    current_rank_rule = serializers.SerializerMethodField()
 
     class Meta:
         model = Member
@@ -46,6 +49,14 @@ class MemberSerializer(serializers.ModelSerializer):
             "referral_code",
             "referred_by",
             "created_at",
+            # Ranked referral system fields
+            "user_type",
+            "rank",
+            "v_coins_balance",
+            "cash_balance",
+            "direct_referrals_count",
+            "active_direct_referrals_count",
+            "current_rank_rule",
         ]
         read_only_fields = [
             "id",
@@ -54,7 +65,50 @@ class MemberSerializer(serializers.ModelSerializer):
             "referral_code",
             "referred_by",
             "created_at",
+            "user_type",
+            "rank",
+            "v_coins_balance",
+            "cash_balance",
+            "direct_referrals_count",
+            "active_direct_referrals_count",
+            "current_rank_rule",
         ]
+
+    def get_direct_referrals_count(self, obj: Member) -> int:
+        """Number of unique level-1 referrals for the member in the ranked system."""
+        return (
+            ReferralRelation.objects.filter(ancestor=obj, level=1)
+            .values("descendant_id")
+            .distinct()
+            .count()
+        )
+
+    def get_active_direct_referrals_count(self, obj: Member) -> int:
+        """Number of active level-1 referrals (has_paid_first_bonus=True)."""
+        return (
+            ReferralRelation.objects.filter(
+                ancestor=obj,
+                level=1,
+                has_paid_first_bonus=True,
+            )
+            .values("descendant_id")
+            .distinct()
+            .count()
+        )
+
+    def get_current_rank_rule(self, obj: Member):
+        """Return the RankRule configuration for the member's current rank."""
+        if not obj.rank:
+            return None
+        try:
+            rule = RankRule.objects.get(rank=obj.rank)
+        except RankRule.DoesNotExist:
+            return None
+        return {
+            "required_referrals": rule.required_referrals,
+            "player_depth_bonus_multiplier": rule.player_depth_bonus_multiplier,
+            "influencer_depth_bonus_multiplier": rule.influencer_depth_bonus_multiplier,
+        }
 
 
 class RegistrationSerializer(serializers.Serializer):
@@ -249,14 +303,18 @@ class ProfileStatsSerializer(serializers.Serializer):
 
 
 class ReferralNodeSerializer(serializers.Serializer):
-    """Serializer for a single node in the referral tree."""
+    """Serializer for a single descendant in the ranked referral tree.
 
-    id = serializers.IntegerField()
+    Based on ReferralRelation entries for a given ancestor.
+    """
+
+    descendant_id = serializers.IntegerField()
+    level = serializers.IntegerField()
+    has_paid_first_bonus = serializers.BooleanField()
     username = serializers.CharField()
-    is_influencer = serializers.BooleanField()
-    depth = serializers.IntegerField()
-    direct_referrals_count = serializers.IntegerField()
-    total_descendants_count = serializers.IntegerField()
+    user_type = serializers.CharField()
+    rank = serializers.CharField()
+    is_active_referral = serializers.BooleanField()
 
 
 class ReferralRewardSerializer(serializers.ModelSerializer):

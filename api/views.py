@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 from rest_framework.exceptions import PermissionDenied
 
 from .authentication import MemberTokenAuthentication
-from .models import Member, ReferralEvent, MemberAuthToken, ReferralReward
+from .models import Member, ReferralEvent, MemberAuthToken, ReferralReward, ReferralRelation
 from .permissions import IsAdminMember
 from .serializers import (
     MessageSerializer,
@@ -55,8 +55,8 @@ class RegisterView(APIView):
         responses={201: MemberSerializer},
         description=(
             "Регистрация нового пользователя по номеру телефона с опциональным реферальным кодом. "
-            "При регистрации с реферальным кодом всем участникам в цепочке наверх начисляется по одному "
-            "бесплатному стартовому стеку."
+            "При наличии реферального кода создаются связи в ранговой реферальной системе, "
+            "а финансовые бонусы начисляются после первого турнира/депозита нового игрока."
         ),
     )
     def post(self, request):
@@ -182,7 +182,10 @@ class ProfileStatsView(APIView):
 
 
 class ReferralTreeView(APIView):
-    """Return referral tree for the current member or a specified member (admin only)."""
+    """Return ranked referral tree descendants for the current or specified member.
+
+    Uses ReferralRelation to expose all descendants with their depth and activation status.
+    """
 
     authentication_classes = [MemberTokenAuthentication]
     permission_classes = [IsAuthenticated]
@@ -205,43 +208,31 @@ class ReferralTreeView(APIView):
                 raise Http404("Пользователь не найден.")
         return member
 
-    def _count_descendants(self, member: Member) -> int:
-        """Count total descendants (on all levels) for the given member."""
-        count = 0
-        visited = set()
-        queue = list(member.referrals.all())
-        while queue:
-            current = queue.pop(0)
-            if current.id in visited:
-                continue
-            visited.add(current.id)
-            count += 1
-            queue.extend(current.referrals.all())
-        return count
-
     def get(self, request):
         root_member = self._get_target_member(request)
-        nodes = []
 
-        visited = set()
-        queue = [(root_member, 0)]
-        while queue:
-            current, depth = queue.pop(0)
-            for child in current.referrals.all():
-                if child.id in visited:
-                    continue
-                visited.add(child.id)
-                child_depth = depth + 1
-                node_data = {
-                    "id": child.id,
-                    "username": child.phone,
-                    "is_influencer": child.is_influencer,
-                    "depth": child_depth,
-                    "direct_referrals_count": child.referrals.count(),
-                    "total_descendants_count": self._count_descendants(child),
+        relations = (
+            ReferralRelation.objects.select_related("descendant")
+            .filter(ancestor=root_member)
+            .order_by("level", "descendant_id")
+        )
+
+        nodes = []
+        for relation in relations:
+            descendant = relation.descendant
+            if descendant is None:
+                continue
+            nodes.append(
+                {
+                    "descendant_id": descendant.id,
+                    "level": relation.level,
+                    "has_paid_first_bonus": relation.has_paid_first_bonus,
+                    "username": descendant.phone,
+                    "user_type": descendant.user_type,
+                    "rank": descendant.rank,
+                    "is_active_referral": bool(relation.has_paid_first_bonus),
                 }
-                nodes.append(node_data)
-                queue.append((child, child_depth))
+            )
 
         serializer = ReferralNodeSerializer(nodes, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
