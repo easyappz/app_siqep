@@ -104,6 +104,51 @@ paths:
           description: 'Ошибка валидации данных.'
         '401':
           description: 'Требуется аутентификация.'
+  /api/withdrawal-requests/:
+    get:
+      operationId: withdrawal_requests_list
+      summary: 'Список заявок на вывод текущего пользователя'
+      description: 'Возвращает список всех заявок на вывод средств, созданных текущим авторизованным пользователем.'
+      tags:
+        - withdrawals
+      security:
+        - MemberTokenAuth: []
+      responses:
+        '200':
+          description: 'Список заявок на вывод.'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WithdrawalRequest'
+        '401':
+          description: Требуется аутентификация
+    post:
+      operationId: withdrawal_requests_create
+      summary: 'Создать заявку на вывод средств'
+      description: 'Создаёт новую заявку на вывод средств для текущего пользователя. Сумма не может превышать доступный для вывода баланс инфлюенсерских вознаграждений.'
+      tags:
+        - withdrawals
+      security:
+        - MemberTokenAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawalRequestCreateRequest'
+      responses:
+        '201':
+          description: 'Заявка на вывод успешно создана.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WithdrawalRequest'
+        '400':
+          description: 'Ошибка валидации данных (например, сумма превышает доступный баланс).'
+        '401':
+          description: Требуется аутентификация
   /api/profile/stats/:
     get:
       operationId: profile_stats_retrieve
@@ -499,6 +544,33 @@ components:
         - last_name
         - phone
         - referral_code
+    Deposit:
+      type: object
+      description: 'Запись о депозите пользователя.'
+      properties:
+        id:
+          type: integer
+          description: 'Идентификатор депозита.'
+        amount:
+          type: string
+          format: decimal
+          description: 'Сумма депозита в рублях.'
+        currency:
+          type: string
+          description: 'Валюта депозита (по умолчанию RUB).'
+        is_test:
+          type: boolean
+          description: 'Является ли депозит тестовым (демонстрационным).'
+        created_at:
+          type: string
+          format: date-time
+          description: 'Дата и время создания депозита.'
+      required:
+        - id
+        - amount
+        - currency
+        - is_test
+        - created_at
     Member:
       type: object
       description: 'Пользователь сервиса (Member) с полями ранговой реферальной системы.'
@@ -579,6 +651,31 @@ components:
           type: string
           nullable: true
           description: 'Адрес криптовалютного кошелька для вывода средств (видит только владелец аккаунта и администратор).'
+        total_deposits:
+          type: string
+          format: decimal
+          description: 'Суммарный объём депозитов пользователя (включая тестовые), в рублях.'
+        total_influencer_earnings:
+          type: string
+          format: decimal
+          description: 'Общая сумма реферальных вознаграждений инфлюенсера в рублях.'
+        deposits:
+          type: array
+          description: 'Список депозитов пользователя (последние сначала).'
+          items:
+            $ref: '#/components/schemas/Deposit'
+        referred_members_count:
+          type: integer
+          description: 'Количество игроков, приглашённых данным пользователем (прямые рефералы 1-го уровня).'
+        available_for_withdrawal:
+          type: string
+          format: decimal
+          description: 'Доступная для вывода сумма инфлюенсерских вознаграждений с учётом уже созданных заявок на вывод.'
+        last_withdrawal_request:
+          allOf:
+            - $ref: '#/components/schemas/WithdrawalRequest'
+          nullable: true
+          description: 'Последняя созданная заявка на вывод средств для пользователя (если есть).'
       required:
         - id
         - first_name
@@ -594,6 +691,11 @@ components:
         - cash_balance
         - direct_referrals_count
         - active_direct_referrals_count
+        - total_deposits
+        - total_influencer_earnings
+        - deposits
+        - referred_members_count
+        - available_for_withdrawal
     RankRuleSummary:
       type: object
       description: 'Правило ранга: порог активных рефералов и множители глубинного бонуса.'
@@ -1370,7 +1472,7 @@ components:
           $ref: '#/components/schemas/SimulateDemoDepositsTimur'
       required:
         - players
-        - timур
+        - timur
     MeUpdateRequest:
       type: object
       description: 'Данные для обновления профиля текущего пользователя и реквизитов вывода.'
@@ -1395,6 +1497,71 @@ components:
           nullable: true
           description: 'Адрес криптовалютного кошелька для вывода средств.'
       required: []
+    WithdrawalRequest:
+      type: object
+      description: 'Заявка пользователя на вывод средств.'
+      properties:
+        id:
+          type: integer
+          description: 'Идентификатор заявки.'
+        amount:
+          type: string
+          format: decimal
+          description: 'Сумма вывода в рублях.'
+        method:
+          type: string
+          description: 'Способ вывода: банковская карта или криптокошелёк.'
+          enum:
+            - card
+            - crypto
+        destination:
+          type: string
+          description: 'Реквизиты получателя (номер карты или адрес криптокошелька).'
+        status:
+          type: string
+          description: 'Статус заявки на вывод.'
+          enum:
+            - pending
+            - approved
+            - rejected
+            - paid
+        created_at:
+          type: string
+          format: date-time
+          description: 'Дата и время создания заявки.'
+        processed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 'Дата и время обработки заявки (если применимо).'
+      required:
+        - id
+        - amount
+        - method
+        - destination
+        - status
+        - created_at
+    WithdrawalRequestCreateRequest:
+      type: object
+      description: 'Данные для создания заявки на вывод средств.'
+      properties:
+        amount:
+          type: string
+          format: decimal
+          description: 'Сумма вывода в рублях.'
+        method:
+          type: string
+          description: 'Способ вывода: банковская карта или криптокошелёк.'
+          enum:
+            - card
+            - crypto
+        destination:
+          type: string
+          description: 'Реквизиты получателя (номер карты или адрес криптокошелька).'
+      required:
+        - amount
+        - method
+        - destination
   securitySchemes:
     basicAuth:
       type: http

@@ -8,6 +8,7 @@ from .views import (
     ProfileStatsView,
     ReferralTreeView,
     ReferralRewardsView,
+    WithdrawalRequestListCreateView,
     AdminMemberListCreateView,
     AdminMemberDetailView,
     AdminReferralEventListView,
@@ -31,6 +32,11 @@ urlpatterns = [
         "referrals/rewards/",
         ReferralRewardsView.as_view(),
         name="referral-rewards",
+    ),
+    path(
+        "withdrawal-requests/",
+        WithdrawalRequestListCreateView.as_view(),
+        name="withdrawal-requests",
     ),
     # Admin panel endpoints
     path(

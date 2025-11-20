@@ -13,7 +13,14 @@ from rest_framework.views import APIView
 from rest_framework.exceptions import PermissionDenied
 
 from .authentication import MemberTokenAuthentication
-from .models import Member, ReferralEvent, MemberAuthToken, ReferralReward, ReferralRelation
+from .models import (
+    Member,
+    ReferralEvent,
+    MemberAuthToken,
+    ReferralReward,
+    ReferralRelation,
+    WithdrawalRequest,
+)
 from .permissions import IsAdminMember
 from .referral_utils import process_member_deposit, simulate_demo_deposits_for_amir_alfira
 from .serializers import (
@@ -34,6 +41,7 @@ from .serializers import (
     TestSimulateDepositsResponseSerializer,
     SimulateDemoDepositsRequestSerializer,
     SimulateDemoDepositsResponseSerializer,
+    WithdrawalRequestSerializer,
 )
 
 
@@ -385,6 +393,42 @@ class ReferralRewardsView(APIView):
             "summary": summary_serializer.data,
         }
         return Response(response_data, status=status.HTTP_200_OK)
+
+
+class WithdrawalRequestListCreateView(generics.ListCreateAPIView):
+    """List and create withdrawal requests for the current member."""
+
+    authentication_classes = [MemberTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+    serializer_class = WithdrawalRequestSerializer
+
+    @extend_schema(
+        responses={200: WithdrawalRequestSerializer(many=True)},
+        description=(
+            "Получить список заявок на вывод средств текущего пользователя."
+        ),
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
+
+    @extend_schema(
+        request=WithdrawalRequestSerializer,
+        responses={201: WithdrawalRequestSerializer},
+        description=(
+            "Создать новую заявку на вывод средств для текущего пользователя. "
+            "Сумма не может превышать доступный для вывода баланс инфлюенсерских вознаграждений."
+        ),
+    )
+    def post(self, request, *args, **kwargs):
+        return super().post(request, *args, **kwargs)
+
+    def get_queryset(self):
+        member: Member = self.request.user
+        return WithdrawalRequest.objects.filter(member=member).order_by("-created_at")
+
+    def perform_create(self, serializer):
+        member: Member = self.request.user
+        serializer.save(member=member, status=WithdrawalRequest.Status.PENDING)
 
 
 # ============================

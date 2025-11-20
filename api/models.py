@@ -180,6 +180,25 @@ class Member(models.Model):
             return Decimal("0.00")
         return total
 
+    @property
+    def available_for_withdrawal(self) -> Decimal:
+        """Return influencer earnings available for withdrawal.
+
+        Calculated as total_influencer_earnings minus amounts from withdrawal
+        requests that are already processed/approved (statuses 'approved' or 'paid').
+        """
+
+        total_withdrawn = (
+            self.withdrawal_requests.filter(status__in=["approved", "paid"]).aggregate(
+                total=Sum("amount")
+            )["total"]
+            or Decimal("0.00")
+        )
+        available = self.total_influencer_earnings - total_withdrawn
+        if available < Decimal("0.00"):
+            return Decimal("0.00")
+        return available
+
     def set_password(self, raw_password: str) -> None:
         """Hash and store the given raw password."""
         self.password_hash = make_password(raw_password)
@@ -201,7 +220,7 @@ class Member(models.Model):
         return f"REF{self.pk}{random_suffix}"
 
     def save(self, *args, **kwargs) -> None:
-        """Ensure a referral_code is generated on first save and influencer_since is set correctly."""
+        """Ensure a referral_code is generated on first save and influencer_since is set correctly.""" 
         is_new = self.pk is None
 
         previous = None
@@ -374,6 +393,48 @@ class RankRule(models.Model):
 
     def __str__(self) -> str:
         return f"RankRule {self.rank} (required={self.required_referrals})"
+
+
+class WithdrawalRequest(models.Model):
+    class Method(models.TextChoices):
+        CARD = "card", "Bank card"
+        CRYPTO = "crypto", "Crypto wallet"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+        PAID = "paid", "Paid"
+
+    id = models.AutoField(primary_key=True)
+    member = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="withdrawal_requests",
+    )
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    method = models.CharField(
+        max_length=16,
+        choices=Method.choices,
+    )
+    destination = models.TextField(
+        help_text=(
+            "Destination details for payout (card number or crypto wallet address)."
+        ),
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"WithdrawalRequest {self.id} member={self.member_id} amount={self.amount}"
 
 
 class MemberAuthToken(models.Model):

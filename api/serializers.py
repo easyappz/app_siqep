@@ -1,7 +1,15 @@
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Member, ReferralEvent, ReferralReward, ReferralRelation, RankRule, Deposit
+from .models import (
+    Member,
+    ReferralEvent,
+    ReferralReward,
+    ReferralRelation,
+    RankRule,
+    Deposit,
+    WithdrawalRequest,
+)
 from .referral_utils import (
     on_new_user_registered,
     process_member_deposit,
@@ -42,6 +50,48 @@ class DepositSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class WithdrawalRequestSerializer(serializers.ModelSerializer):
+    """Serializer for withdrawal requests of a member."""
+
+    class Meta:
+        model = WithdrawalRequest
+        fields = [
+            "id",
+            "amount",
+            "method",
+            "destination",
+            "status",
+            "created_at",
+            "processed_at",
+        ]
+        read_only_fields = [
+            "id",
+            "status",
+            "created_at",
+            "processed_at",
+        ]
+
+    def validate_amount(self, value):
+        """Ensure amount is positive and does not exceed available balance."""
+
+        if value <= 0:
+            raise serializers.ValidationError(
+                "Сумма вывода должна быть положительным числом."
+            )
+
+        request = self.context.get("request")
+        member = getattr(request, "user", None)
+
+        if isinstance(member, Member):
+            available = member.available_for_withdrawal
+            if value > available:
+                raise serializers.ValidationError(
+                    "Сумма вывода превышает доступный баланс для вывода."
+                )
+
+        return value
+
+
 class MemberSerializer(serializers.ModelSerializer):
     """Serializer for public member profile data with ranked referral fields."""
 
@@ -52,6 +102,9 @@ class MemberSerializer(serializers.ModelSerializer):
     total_deposits = serializers.SerializerMethodField()
     total_influencer_earnings = serializers.SerializerMethodField()
     deposits = DepositSerializer(many=True, read_only=True)
+    referred_members_count = serializers.SerializerMethodField()
+    available_for_withdrawal = serializers.SerializerMethodField()
+    last_withdrawal_request = serializers.SerializerMethodField()
 
     class Meta:
         model = Member
@@ -80,6 +133,9 @@ class MemberSerializer(serializers.ModelSerializer):
             "total_deposits",
             "total_influencer_earnings",
             "deposits",
+            "referred_members_count",
+            "available_for_withdrawal",
+            "last_withdrawal_request",
         ]
         read_only_fields = [
             "id",
@@ -100,6 +156,9 @@ class MemberSerializer(serializers.ModelSerializer):
             "total_deposits",
             "total_influencer_earnings",
             "deposits",
+            "referred_members_count",
+            "available_for_withdrawal",
+            "last_withdrawal_request",
         ]
 
     def get_direct_referrals_count(self, obj: Member) -> int:
@@ -139,18 +198,36 @@ class MemberSerializer(serializers.ModelSerializer):
         }
 
     def get_total_deposits(self, obj: Member):
-        """Return the total deposits amount for the member as a float."""
+        """Return the total deposits amount for the member as a decimal string."""
         total = getattr(obj, "total_deposits", None)
         if total is None:
-            return 0.0
-        return float(total)
+            return "0.00"
+        return str(total)
 
     def get_total_influencer_earnings(self, obj: Member):
-        """Return the total influencer earnings for the member as a float."""
+        """Return the total influencer earnings for the member as a decimal string."""
         total = getattr(obj, "total_influencer_earnings", None)
         if total is None:
-            return 0.0
-        return float(total)
+            return "0.00"
+        return str(total)
+
+    def get_referred_members_count(self, obj: Member) -> int:
+        """Return count of direct referred members (level 1)."""
+        return self.get_direct_referrals_count(obj)
+
+    def get_available_for_withdrawal(self, obj: Member) -> str:
+        """Return available influencer earnings for withdrawal as a decimal string."""
+        available = getattr(obj, "available_for_withdrawal", None)
+        if available is None:
+            return "0.00"
+        return str(available)
+
+    def get_last_withdrawal_request(self, obj: Member):
+        """Return the latest withdrawal request data for the member, if any."""
+        request_obj = obj.withdrawal_requests.order_by("-created_at").first()
+        if request_obj is None:
+            return None
+        return WithdrawalRequestSerializer(request_obj).data
 
 
 class RegistrationSerializer(serializers.Serializer):
