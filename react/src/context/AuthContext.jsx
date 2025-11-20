@@ -31,14 +31,15 @@ const getInitialAuthState = () => {
 };
 
 export const AuthProvider = ({ children }) => {
-  const [token, setToken] = useState(null);
-  const [member, setMemberState] = useState(null);
-
-  useEffect(() => {
+  const [token, setToken] = useState(() => {
     const initial = getInitialAuthState();
-    setToken(initial.token);
-    setMemberState(initial.member);
-  }, []);
+    return initial.token;
+  });
+
+  const [member, setMemberState] = useState(() => {
+    const initial = getInitialAuthState();
+    return initial.member;
+  });
 
   useEffect(() => {
     if (typeof window === 'undefined') {

@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { registerMember } from '../../../api/auth';
 import { useAuth } from '../../../context/AuthContext';
 
 const RegisterPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login } = useAuth();
 
   const [formValues, setFormValues] = useState({
@@ -19,6 +20,22 @@ const RegisterPage = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+
+  useEffect(() => {
+    if (!location || !location.search) {
+      return;
+    }
+
+    const params = new URLSearchParams(location.search);
+    const refFromLink = params.get('ref');
+
+    if (refFromLink && !formValues.referral_code) {
+      setFormValues((prev) => ({
+        ...prev,
+        referral_code: refFromLink,
+      }));
+    }
+  }, [location, formValues.referral_code]);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
