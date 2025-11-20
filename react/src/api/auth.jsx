@@ -40,3 +40,20 @@ export async function fetchCurrentMember() {
   const response = await instance.get('/api/auth/me/');
   return response.data;
 }
+
+export async function changePassword(data) {
+  const response = await instance.post('/api/auth/change-password/', data);
+  return response.data;
+}
+
+export async function requestPasswordReset(data) {
+  const payload = data && typeof data === 'object' ? data : {};
+  const response = await instance.post('/api/auth/password-reset/request/', payload);
+  return response.data;
+}
+
+export async function confirmPasswordReset(data) {
+  const payload = data && typeof data === 'object' ? data : {};
+  const response = await instance.post('/api/auth/password-reset/confirm/', payload);
+  return response.data;
+}

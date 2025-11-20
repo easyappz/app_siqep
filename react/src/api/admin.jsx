@@ -29,3 +29,9 @@ export async function fetchAdminStatsOverview() {
   const response = await instance.get('/api/admin/stats/overview/');
   return response.data;
 }
+
+export async function resetMemberPassword(memberId, data) {
+  const payload = data && typeof data === 'object' ? data : {};
+  const response = await instance.post(`/api/admin/members/${memberId}/reset-password/`, payload);
+  return response.data;
+}

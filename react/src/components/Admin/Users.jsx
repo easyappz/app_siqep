@@ -3,6 +3,7 @@ import {
   fetchAdminMembers,
   createAdminMember,
   updateAdminMember,
+  resetMemberPassword,
 } from '../../api/admin';
 
 const initialFormState = {
@@ -29,6 +30,13 @@ const AdminUsersPage = () => {
   const [formSuccess, setFormSuccess] = useState('');
 
   const [updateError, setUpdateError] = useState('');
+
+  const [resetModalMemberId, setResetModalMemberId] = useState(null);
+  const [resetCustomPassword, setResetCustomPassword] = useState('');
+  const [resetResultPassword, setResetResultPassword] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetError, setResetError] = useState('');
+  const [resetSuccess, setResetSuccess] = useState('');
 
   const loadMembers = async (pageParam) => {
     setLoading(true);
@@ -134,6 +142,73 @@ const AdminUsersPage = () => {
   const handleNextPage = () => {
     if (page < totalPages) {
       setPage((prev) => prev + 1);
+    }
+  };
+
+  const openResetModal = (memberId) => {
+    setResetModalMemberId(memberId);
+    setResetCustomPassword('');
+    setResetResultPassword('');
+    setResetLoading(false);
+    setResetError('');
+    setResetSuccess('');
+  };
+
+  const closeResetModal = () => {
+    setResetModalMemberId(null);
+    setResetCustomPassword('');
+    setResetResultPassword('');
+    setResetLoading(false);
+    setResetError('');
+    setResetSuccess('');
+  };
+
+  const handleConfirmReset = async () => {
+    if (!resetModalMemberId) {
+      return;
+    }
+
+    setResetLoading(true);
+    setResetError('');
+    setResetSuccess('');
+    setResetResultPassword('');
+
+    try {
+      const payload = {};
+      const trimmedPassword = resetCustomPassword ? resetCustomPassword.trim() : '';
+
+      if (trimmedPassword) {
+        payload.new_password = trimmedPassword;
+      }
+
+      const data = await resetMemberPassword(resetModalMemberId, payload);
+
+      const generated = data && data.generated_password ? String(data.generated_password) : '';
+      const detail = data && data.detail
+        ? data.detail
+        : 'Пароль пользователя успешно сброшен администратором.';
+
+      setResetSuccess(detail);
+      setResetResultPassword(generated);
+    } catch (err) {
+      console.error('Failed to reset member password', err);
+      const responseData = err && err.response && err.response.data ? err.response.data : null;
+      let message = 'Не удалось сбросить пароль. Попробуйте ещё раз.';
+
+      if (responseData) {
+        if (responseData.new_password) {
+          const value = Array.isArray(responseData.new_password)
+            ? responseData.new_password[0]
+            : responseData.new_password;
+          message = String(value);
+        } else if (responseData.detail && typeof responseData.detail === 'string') {
+          message = responseData.detail;
+        }
+      }
+
+      setResetError(message);
+    } finally {
+      setResetLoading(false);
     }
   };
 
@@ -308,85 +383,168 @@ const AdminUsersPage = () => {
                   <th>Инфлюенсер-программа</th>
                   <th>Инфлюенсер</th>
                   <th>Админ</th>
+                  <th>Сброс пароля</th>
                 </tr>
               </thead>
               <tbody>
                 {members.length === 0 && (
                   <tr>
-                    <td colSpan={12} className="admin-table-empty">
+                    <td colSpan={13} className="admin-table-empty">
                       Пользователи не найдены.
                     </td>
                   </tr>
                 )}
 
                 {members.map((member) => (
-                  <tr key={member.id}>
-                    <td>
-                      <div className="admin-member-name-cell">
-                        <span>{member.first_name}</span>
-                        {member.is_influencer && (
-                          <span className="admin-badge admin-badge-influencer">Инфлюенсер</span>
+                  <React.Fragment key={member.id}>
+                    <tr>
+                      <td>
+                        <div className="admin-member-name-cell">
+                          <span>{member.first_name}</span>
+                          {member.is_influencer && (
+                            <span className="admin-badge admin-badge-influencer">Инфлюенсер</span>
+                          )}
+                        </div>
+                      </td>
+                      <td>{member.last_name}</td>
+                      <td>{member.phone}</td>
+                      <td>{member.email || '—'}</td>
+                      <td>{member.is_influencer ? 'Инфлюенсер' : 'Игрок'}</td>
+                      <td>{member.is_admin ? 'Админ' : 'Пользователь'}</td>
+                      <td>{member.total_referrals}</td>
+                      <td>{member.total_bonus_points}</td>
+                      <td>{member.total_money_earned} ₽</td>
+                      <td>
+                        {member.is_influencer ? (
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={() =>
+                              handleToggleFlag(member.id, 'is_influencer', false)
+                            }
+                          >
+                            Снять статус инфлюенсера
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            onClick={() =>
+                              handleToggleFlag(member.id, 'is_influencer', true)
+                            }
+                          >
+                            Сделать инфлюенсером
+                          </button>
                         )}
-                      </div>
-                    </td>
-                    <td>{member.last_name}</td>
-                    <td>{member.phone}</td>
-                    <td>{member.email || '—'}</td>
-                    <td>{member.is_influencer ? 'Инфлюенсер' : 'Игрок'}</td>
-                    <td>{member.is_admin ? 'Админ' : 'Пользователь'}</td>
-                    <td>{member.total_referrals}</td>
-                    <td>{member.total_bonus_points}</td>
-                    <td>{member.total_money_earned} ₽</td>
-                    <td>
-                      {member.is_influencer ? (
+                      </td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={member.is_influencer}
+                          onChange={(event) =>
+                            handleToggleFlag(
+                              member.id,
+                              'is_influencer',
+                              event.target.checked
+                            )
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={member.is_admin}
+                          onChange={(event) =>
+                            handleToggleFlag(
+                              member.id,
+                              'is_admin',
+                              event.target.checked
+                            )
+                          }
+                        />
+                      </td>
+                      <td>
                         <button
                           type="button"
                           className="btn btn-secondary"
-                          onClick={() =>
-                            handleToggleFlag(member.id, 'is_influencer', false)
-                          }
+                          onClick={() => openResetModal(member.id)}
                         >
-                          Снять статус инфлюенсера
+                          Сбросить пароль
                         </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="btn btn-primary"
-                          onClick={() =>
-                            handleToggleFlag(member.id, 'is_influencer', true)
-                          }
-                        >
-                          Сделать инфлюенсером
-                        </button>
-                      )}
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={member.is_influencer}
-                        onChange={(event) =>
-                          handleToggleFlag(
-                            member.id,
-                            'is_influencer',
-                            event.target.checked
-                          )
-                        }
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={member.is_admin}
-                        onChange={(event) =>
-                          handleToggleFlag(
-                            member.id,
-                            'is_admin',
-                            event.target.checked
-                          )
-                        }
-                      />
-                    </td>
-                  </tr>
+                      </td>
+                    </tr>
+
+                    {resetModalMemberId === member.id && (
+                      <tr>
+                        <td colSpan={13} className="admin-reset-row">
+                          <div className="admin-reset-panel">
+                            <h4 className="admin-reset-title">
+                              Сброс пароля для пользователя ID {member.id}
+                            </h4>
+                            <p className="admin-reset-text">
+                              Вы можете задать новый пароль вручную или оставить поле пустым,
+                              чтобы система сгенерировала случайный безопасный пароль.
+                            </p>
+
+                            <div className="admin-form-row">
+                              <label className="admin-form-label" htmlFor={`resetPassword-${member.id}`}>
+                                Новый пароль (необязательно)
+                              </label>
+                              <input
+                                id={`resetPassword-${member.id}`}
+                                type="password"
+                                className="admin-form-input"
+                                value={resetCustomPassword}
+                                onChange={(event) => setResetCustomPassword(event.target.value)}
+                                placeholder="Оставьте пустым для автогенерации пароля"
+                              />
+                            </div>
+
+                            {resetError && (
+                              <div className="admin-form-error">{resetError}</div>
+                            )}
+
+                            {resetSuccess && (
+                              <div className="admin-form-success">{resetSuccess}</div>
+                            )}
+
+                            {resetResultPassword && (
+                              <div className="admin-reset-password-result">
+                                <div className="admin-reset-password-label">
+                                  Сгенерированный пароль (показывается один раз):
+                                </div>
+                                <div className="admin-reset-password-value">
+                                  {resetResultPassword}
+                                </div>
+                                <div className="admin-reset-password-note">
+                                  Передайте этот пароль пользователю безопасным способом.
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="admin-reset-actions">
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                onClick={closeResetModal}
+                                disabled={resetLoading}
+                              >
+                                Отмена
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-primary"
+                                onClick={handleConfirmReset}
+                                disabled={resetLoading}
+                              >
+                                {resetLoading ? 'Сброс...' : 'Сбросить пароль'}
+                              </button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>

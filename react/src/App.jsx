@@ -12,6 +12,7 @@ import AdminLayout from './components/Admin/Layout';
 import AdminOverviewPage from './components/Admin/Overview';
 import AdminUsersPage from './components/Admin/Users';
 import AdminReferralsPage from './components/Admin/Referrals';
+import PasswordResetPage from './components/Auth/PasswordReset';
 import { useAuth } from './context/AuthContext';
 
 function PrivateRoute({ children }) {
@@ -48,6 +49,7 @@ function App() {
         '/login',
         '/register',
         '/profile',
+        '/password-reset',
         '/admin',
         '/admin/overview',
         '/admin/users',
@@ -64,6 +66,7 @@ function App() {
             <Route path="/" element={<Home />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/password-reset" element={<PasswordResetPage />} />
 
             <Route
               path="/profile"

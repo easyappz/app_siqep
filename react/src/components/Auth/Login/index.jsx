@@ -121,6 +121,14 @@ const LoginPage = () => {
               />
             </div>
 
+            <div className="auth-form-group auth-form-group-inline">
+              <div className="auth-helper-inline">
+                <Link to="/password-reset" className="auth-link">
+                  Забыли пароль?
+                </Link>
+              </div>
+            </div>
+
             {errorMessage && (
               <div className="auth-message auth-message-error">{errorMessage}</div>
             )}

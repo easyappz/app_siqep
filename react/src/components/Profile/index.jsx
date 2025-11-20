@@ -14,6 +14,7 @@ import { AuthContext, useAuth } from '../../context/AuthContext';
 import { getProfile, fetchProfileStats, updateProfile } from '../../api/profile';
 import { fetchReferralTree, fetchReferralRewards } from '../../api/referrals';
 import { createWithdrawalRequest, getMyWithdrawalRequests } from '../../api/withdrawals';
+import { changePassword } from '../../api/auth';
 
 function getUserTypeFromMember(member) {
   if (!member) {
@@ -123,6 +124,12 @@ const ProfilePage = () => {
   const [withdrawals, setWithdrawals] = useState([]);
   const [isLoadingWithdrawals, setIsLoadingWithdrawals] = useState(false);
   const [withdrawalsError, setWithdrawalsError] = useState('');
+
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [changePasswordErrors, setChangePasswordErrors] = useState({});
+  const [changePasswordSuccess, setChangePasswordSuccess] = useState('');
 
   const handleCopyLink = async (link) => {
     if (!link) {
@@ -610,6 +617,70 @@ const ProfilePage = () => {
       ? getInfluencerRewardDescription(rankLabel, currentRankRule)
       : getPlayerRewardDescription(rankLabel, currentRankRule);
 
+  const handleChangePasswordSubmit = async (event) => {
+    event.preventDefault();
+    setChangePasswordErrors({});
+    setChangePasswordSuccess('');
+
+    if (!oldPassword || !newPassword) {
+      setChangePasswordErrors({
+        non_field_errors: 'Пожалуйста, заполните оба поля.',
+      });
+      return;
+    }
+
+    setIsChangingPassword(true);
+
+    try {
+      const payload = {
+        old_password: oldPassword,
+        new_password: newPassword,
+      };
+
+      const data = await changePassword(payload);
+      const detailMessage = data && data.detail
+        ? data.detail
+        : 'Пароль успешно изменён.';
+
+      setChangePasswordSuccess(detailMessage);
+      setOldPassword('');
+      setNewPassword('');
+    } catch (error) {
+      const responseData = error && error.response && error.response.data ? error.response.data : null;
+      const nextErrors = {};
+
+      if (responseData) {
+        if (responseData.old_password) {
+          const value = Array.isArray(responseData.old_password)
+            ? responseData.old_password[0]
+            : responseData.old_password;
+          nextErrors.old_password = String(value);
+        }
+        if (responseData.new_password) {
+          const value = Array.isArray(responseData.new_password)
+            ? responseData.new_password[0]
+            : responseData.new_password;
+          nextErrors.new_password = String(value);
+        }
+        if (responseData.non_field_errors) {
+          const value = Array.isArray(responseData.non_field_errors)
+            ? responseData.non_field_errors[0]
+            : responseData.non_field_errors;
+          nextErrors.non_field_errors = String(value);
+        }
+        if (!nextErrors.non_field_errors && typeof responseData.detail === 'string') {
+          nextErrors.non_field_errors = responseData.detail;
+        }
+      } else {
+        nextErrors.non_field_errors = 'Не удалось изменить пароль. Попробуйте ещё раз.';
+      }
+
+      setChangePasswordErrors(nextErrors);
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
   return (
     <main
       data-easytag="id1-react/src/components/Profile/index.jsx"
@@ -707,47 +778,117 @@ const ProfilePage = () => {
             )}
           </section>
 
-          <section className="card profile-referral-card">
-            <h2 className="profile-section-title">Реферальная программа</h2>
+          <section className="card profile-password-card">
+            <h2 className="profile-section-title">Смена пароля</h2>
             <p className="profile-section-text">
-              Делитесь персональной ссылкой, приглашайте новых игроков в офлайн покерный
-              клуб и получайте вознаграждения в глубину всей вашей структуры.
+              Для безопасности аккаунта регулярно обновляйте пароль. Новый пароль должен
+              содержать не менее 6 символов.
             </p>
 
-            <div className="profile-referral-block">
-              <div className="profile-label">Ваша реферальная ссылка</div>
-              <div className="profile-referral-input-row">
+            <form className="profile-payout-form" onSubmit={handleChangePasswordSubmit}>
+              <div className="profile-form-row">
+                <label className="profile-label" htmlFor="oldPassword">
+                  Текущий пароль
+                </label>
                 <input
-                  type="text"
-                  readOnly
-                  value={referralLink}
-                  className="profile-referral-input"
+                  id="oldPassword"
+                  type="password"
+                  className="profile-input"
+                  value={oldPassword}
+                  onChange={(event) => setOldPassword(event.target.value)}
+                  placeholder="Введите текущий пароль"
                 />
-                <button
-                  type="button"
-                  className="btn btn-primary profile-referral-copy-btn"
-                  onClick={() => handleCopyLink(referralLink)}
-                  disabled={!referralLink}
-                >
-                  Скопировать
-                </button>
+                {changePasswordErrors.old_password && (
+                  <div className="profile-status-message profile-status-error">
+                    {changePasswordErrors.old_password}
+                  </div>
+                )}
               </div>
 
-              {copyStatus && <div className="profile-copy-status">{copyStatus}</div>}
-            </div>
+              <div className="profile-form-row">
+                <label className="profile-label" htmlFor="newPassword">
+                  Новый пароль
+                </label>
+                <input
+                  id="newPassword"
+                  type="password"
+                  className="profile-input"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  placeholder="Минимум 6 символов"
+                />
+                {changePasswordErrors.new_password && (
+                  <div className="profile-status-message profile-status-error">
+                    {changePasswordErrors.new_password}
+                  </div>
+                )}
+              </div>
 
-            <ul className="profile-rules-list">
-              <li>
-                Вы получаете 1 бесплатный стартовый стек (1000 ₽ участие в турнире) за
-                каждого нового игрока, который впервые приходит в клуб по вашей ссылке.
-              </li>
-              <li>
-                Если ваш реферал приглашает новых игроков, вы также получаете свои бонусы
-                по всей цепочке до максимальной глубины программы.
-              </li>
-            </ul>
+              {changePasswordErrors.non_field_errors && (
+                <div className="profile-status-message profile-status-error">
+                  {changePasswordErrors.non_field_errors}
+                </div>
+              )}
+
+              {changePasswordSuccess && (
+                <div className="profile-status-message profile-status-success">
+                  {changePasswordSuccess}
+                </div>
+              )}
+
+              <div className="profile-form-actions">
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={isChangingPassword}
+                >
+                  {isChangingPassword ? 'Сохранение...' : 'Изменить пароль'}
+                </button>
+              </div>
+            </form>
           </section>
         </div>
+
+        <section className="card profile-referral-card">
+          <h2 className="profile-section-title">Реферальная программа</h2>
+          <p className="profile-section-text">
+            Делитесь персональной ссылкой, приглашайте новых игроков в офлайн покерный
+            клуб и получайте вознаграждения в глубину всей вашей структуры.
+          </p>
+
+          <div className="profile-referral-block">
+            <div className="profile-label">Ваша реферальная ссылка</div>
+            <div className="profile-referral-input-row">
+              <input
+                type="text"
+                readOnly
+                value={referralLink}
+                className="profile-referral-input"
+              />
+              <button
+                type="button"
+                className="btn btn-primary profile-referral-copy-btn"
+                onClick={() => handleCopyLink(referralLink)}
+                disabled={!referralLink}
+              >
+                Скопировать
+              </button>
+            </div>
+
+            {copyStatus && <div className="profile-copy-status">{copyStatus}</div>}
+          </div>
+
+          <ul className="profile-rules-list">
+            <li>
+              Вы получаете 1 бесплатный стартовый стек (1000 ₽ участие в турнире) за
+              каждого нового игрока, который впервые приходит в клуб по вашей ссылке.
+            </li>
+            <li>
+              Если ваш реферал приглашает новых игроков, вы также получаете свои бонусы
+              по всей цепочке до максимальной глубины программы.
+            </li>
+          </ul>
+        </section>
 
         <section className="card profile-rank-info-card">
           <h2 className="profile-section-title">Ваш ранг и правила вознаграждений</h2>
