@@ -8,20 +8,38 @@ from django.utils import timezone
 def create_test_deposits_for_amir_and_alfira(apps, schema_editor):
     """Create test deposits for Амир and Альфира and ensure Timur earns commission.
 
+    IMPORTANT: This migration uses only historical models obtained via
+    ``apps.get_model`` and does NOT import runtime code from ``api``.
+    This avoids mixing different ``Member`` model classes in ORM queries,
+    which previously caused ``ValueError: Cannot query "Member object (X)":
+    Must be "Member" instance.`` when calling runtime helpers from here.
+
     Steps:
     - Ensure influencer Timur exists and is marked as influencer.
     - Ensure test members Амир и Альфира exist (using fixed test phone numbers).
-    - Link them as direct referrals of Timur.
-    - Create a 2000 RUB test Deposit for each of them (if not already present).
-    - For each newly created Deposit, run the standard referral deposit logic
-      so that Timur receives his commission and rewards are recorded.
+    - Link them as direct referrals of Timur and create corresponding
+      ``ReferralRelation`` rows.
+    - Create a 2000 RUB test ``Deposit`` for each of them (if not already present).
+    - For each newly created ``Deposit``, record a ``ReferralEvent`` and apply
+      influencer bonuses directly using the historical models:
+        * one‑time 500 ₽ bonus for the first qualifying tournament/deposit;
+        * lifetime 10% commission from each deposit.
 
-    The migration is idempotent: if members, relations or deposits already
-    exist, they are reused and not duplicated.
+    The migration is idempotent with respect to deposits: if a test deposit
+    already exists for a given member, no new deposit or extra bonuses are
+    created for that member.
     """
 
     Member = apps.get_model("api", "Member")
     Deposit = apps.get_model("api", "Deposit")
+    ReferralRelation = apps.get_model("api", "ReferralRelation")
+    ReferralEvent = apps.get_model("api", "ReferralEvent")
+    ReferralReward = apps.get_model("api", "ReferralReward")
+
+    # Constants duplicated here intentionally to keep the migration stable
+    # even if business constants change in the Python code later.
+    INFLUENCER_FIRST_TOURNAMENT_BONUS = Decimal("500")
+    INFLUENCER_DEPOSIT_PERCENT = Decimal("0.10")
 
     # --- Ensure Timur exists and is an influencer ---
     timur = Member.objects.filter(phone="89031221111").first()
@@ -64,9 +82,6 @@ def create_test_deposits_for_amir_and_alfira(apps, schema_editor):
         if updated_fields:
             timur.save(update_fields=updated_fields)
 
-    # Import referral utilities from the current codebase.
-    from api import referral_utils
-
     players_def = [
         {
             "first_name": "Амир",
@@ -105,8 +120,6 @@ def create_test_deposits_for_amir_and_alfira(apps, schema_editor):
                 referrer=timur,
                 referred_by=timur,
             )
-            # Build referral relations for the new member
-            referral_utils.on_new_user_registered(member)
         else:
             # Ensure the existing member is linked to Timur as direct referrer
             updated_fields = []
@@ -121,8 +134,14 @@ def create_test_deposits_for_amir_and_alfira(apps, schema_editor):
                 updated_fields.append("user_type")
             if updated_fields:
                 member.save(update_fields=updated_fields)
-                # Rebuild referral relations for this member
-                referral_utils.on_new_user_registered(member)
+
+        # Ensure direct referral relation Timur -> member exists (level 1).
+        if timur.id is not None and member.id is not None:
+            ReferralRelation.objects.get_or_create(
+                ancestor_id=timur.id,
+                descendant_id=member.id,
+                defaults={"level": 1, "has_paid_first_bonus": False},
+            )
 
         # Create a test deposit for this member if it does not yet exist
         deposit_exists = Deposit.objects.filter(
@@ -141,10 +160,76 @@ def create_test_deposits_for_amir_and_alfira(apps, schema_editor):
             )
             new_deposits.append(deposit)
 
-    # Apply referral logic for all newly created deposits so that Timur earns
-    # his commission and rewards are properly recorded.
+    # Apply simple referral logic for all newly created deposits so that Timur
+    # earns his commission and rewards are properly recorded. We operate only
+    # with historical models and primary keys to avoid cross-app model issues.
     for deposit in new_deposits:
-        referral_utils.process_deposit_for_referrals(deposit)
+        member = deposit.member
+        if member is None or timur.id is None or member.id is None:
+            continue
+
+        # Create an analytics ReferralEvent if there is not already one with
+        # the same referrer, referred and deposit amount.
+        if not ReferralEvent.objects.filter(
+            referrer_id=timur.id,
+            referred_id=member.id,
+            deposit_amount=int(deposit.amount),
+        ).exists():
+            ReferralEvent.objects.create(
+                referrer_id=timur.id,
+                referred_id=member.id,
+                bonus_amount=0,
+                money_amount=0,
+                deposit_amount=int(deposit.amount),
+                created_at=deposit.created_at,
+            )
+
+        # One-time first-tournament bonus for direct influencer referrer.
+        relation = ReferralRelation.objects.filter(
+            ancestor_id=timur.id,
+            descendant_id=member.id,
+        ).first()
+
+        if relation and not relation.has_paid_first_bonus:
+            bonus = INFLUENCER_FIRST_TOURNAMENT_BONUS
+
+            timur.cash_balance = (timur.cash_balance or Decimal("0.00")) + bonus
+            timur.total_money_earned = (timur.total_money_earned or 0) + int(bonus)
+            timur.save(update_fields=["cash_balance", "total_money_earned"])
+
+            ReferralReward.objects.create(
+                member_id=timur.id,
+                source_member_id=member.id,
+                reward_type="INFLUENCER_FIRST_TOURNAMENT",
+                amount_rub=bonus,
+                stack_count=0,
+                depth=1,
+            )
+
+            relation.has_paid_first_bonus = True
+            relation.save(update_fields=["has_paid_first_bonus"])
+
+        # Lifetime 10% influencer commission for this deposit.
+        commission = (deposit.amount * INFLUENCER_DEPOSIT_PERCENT).quantize(
+            Decimal("0.01")
+        )
+        if commission <= 0:
+            continue
+
+        timur.cash_balance = (timur.cash_balance or Decimal("0.00")) + commission
+        timur.total_money_earned = (
+            timur.total_money_earned or 0
+        ) + int(commission)
+        timur.save(update_fields=["cash_balance", "total_money_earned"])
+
+        ReferralReward.objects.create(
+            member_id=timur.id,
+            source_member_id=member.id,
+            reward_type="INFLUENCER_DEPOSIT_PERCENT",
+            amount_rub=commission,
+            stack_count=0,
+            depth=1,
+        )
 
 
 def noop_reverse_func(apps, schema_editor):
