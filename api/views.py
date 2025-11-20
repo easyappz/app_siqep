@@ -29,6 +29,8 @@ from .serializers import (
 class HelloView(APIView):
     """A simple API endpoint that returns a greeting message."""
 
+    permission_classes = [AllowAny]
+
     @extend_schema(
         responses={200: MessageSerializer},
         description="Get a hello world message",

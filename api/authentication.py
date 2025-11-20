@@ -1,6 +1,7 @@
 from typing import Optional, Tuple
 
-from rest_framework.authentication import BaseAuthentication
+from rest_framework.authentication import BaseAuthentication, get_authorization_header
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.request import Request
 
 from .models import MemberAuthToken
@@ -17,29 +18,61 @@ class MemberTokenAuthentication(BaseAuthentication):
 
     keyword = "Token"
 
-    def authenticate(self, request: Request) -> Optional[Tuple[object, None]]:
-        auth_header = request.headers.get("Authorization")
-        if not auth_header:
-            auth_header = request.META.get("HTTP_AUTHORIZATION")
+    def authenticate(self, request: Request) -> Optional[Tuple[object, object]]:
+        """Authenticate the request using a Token in the Authorization header.
 
-        if not auth_header:
+        The implementation is intentionally close to DRF's built-in
+        TokenAuthentication to reliably handle different header formats
+        and WSGI environments.
+        """
+
+        auth = get_authorization_header(request).split()
+
+        if not auth:
             return None
 
-        parts = auth_header.split()
-        if len(parts) != 2:
+        try:
+            keyword = auth[0].decode("ascii").lower()
+        except UnicodeError:
+            raise AuthenticationFailed(
+                "Invalid token header. Token string should not contain invalid characters."
+            )
+
+        if keyword != self.keyword.lower():
+            # Different auth scheme (e.g. Basic/Bearer) – let other authenticators handle it.
             return None
 
-        if parts[0] != self.keyword:
-            return None
+        if len(auth) == 1:
+            raise AuthenticationFailed(
+                "Invalid token header. No credentials provided."
+            )
 
-        token_key = parts[1].strip()
+        if len(auth) > 2:
+            raise AuthenticationFailed(
+                "Invalid token header. Token string should not contain spaces."
+            )
+
+        try:
+            token_key = auth[1].decode("ascii")
+        except UnicodeError:
+            raise AuthenticationFailed(
+                "Invalid token header. Token string should not contain invalid characters."
+            )
+
         if not token_key:
-            return None
+            raise AuthenticationFailed(
+                "Invalid token header. No credentials provided."
+            )
 
         try:
             token = MemberAuthToken.objects.select_related("member").get(key=token_key)
         except MemberAuthToken.DoesNotExist:
-            return None
+            raise AuthenticationFailed("Invalid token.")
 
         member = token.member
-        return member, None
+        return member, token
+
+    def authenticate_header(self, request: Request) -> str:  # pragma: no cover - simple header
+        """Return the value for the WWW-Authenticate header on 401 responses."""
+
+        return f"{self.keyword} realm=\"api\""
