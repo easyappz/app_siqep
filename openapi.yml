@@ -407,6 +407,34 @@ paths:
           description: Требуется аутентификация
         '403':
           description: Доступ запрещён
+  /api/test/simulate_demo_deposits/:
+    post:
+      operationId: test_simulate_demo_deposits_create
+      summary: 'Тестовый: демо-депозиты для Амир и Альфира и заработок Тимура'
+      description: 'Тестовый админский эндпоинт, который моделирует покупку турнирных фишек (депозиты) по 2000 ₽ для игроков «Амир» и «Альфира». Депозиты привязываются к инфлюенсеру Тимуру (телефон 89031221111) как к прямому рефереру, создаются необходимые связи ReferralRelation и вызывается стандартная бизнес-логика депозитов. В ответе возвращается информация по игрокам и заработок Тимура до и после операции.'
+      tags:
+        - test
+      security:
+        - MemberTokenAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulateDemoDepositsRequest'
+      responses:
+        '200':
+          description: 'Результат симуляции демо-депозитов и заработка Тимура'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulateDemoDepositsResponse'
+        '400':
+          description: 'Ошибка конфигурации или некорректные данные (например, не найден Тимур или неположительная сумма депозита)'
+        '401':
+          description: Требуется аутентификация
+        '403':
+          description: Доступ запрещён
 components:
   schemas:
     Message:
@@ -1189,6 +1217,100 @@ components:
       required:
         - status
         - deposits
+    SimulateDemoDepositsRequest:
+      type: object
+      description: 'Параметры для тестовой симуляции демо-депозитов Амир и Альфира.'
+      properties:
+        amount:
+          type: integer
+          description: 'Сумма депозита в рублях для каждого игрока. По умолчанию 2000.'
+      required: []
+    SimulateDemoDepositsPlayerDeposit:
+      type: object
+      description: 'Информация об одном депозите игрока в рамках демо-сценария.'
+      properties:
+        id:
+          type: integer
+          description: 'ID записи ReferralEvent, соответствующей депозиту.'
+        amount:
+          type: integer
+          description: 'Сумма депозита в рублях.'
+        created_at:
+          type: string
+          format: date-time
+          description: 'Дата и время создания депозита.'
+      required:
+        - id
+        - amount
+        - created_at
+    SimulateDemoDepositsPlayer:
+      type: object
+      description: 'Игрок (Амир или Альфира) и связанные с ним депозиты в демо-сценарии.'
+      properties:
+        member_id:
+          type: integer
+          description: 'ID участника (Member.id).'
+        name:
+          type: string
+          description: 'Отображаемое имя игрока.'
+        phone:
+          type: string
+          description: 'Номер телефона игрока.'
+        deposits:
+          type: array
+          description: 'Список депозитов, созданных или переиспользованных для этого игрока в рамках демо-сценария.'
+          items:
+            $ref: '#/components/schemas/SimulateDemoDepositsPlayerDeposit'
+      required:
+        - member_id
+        - name
+        - phone
+        - deposits
+    SimulateDemoDepositsTimur:
+      type: object
+      description: 'Информация о заработке инфлюенсера Тимура в результате демо-депозитов.'
+      properties:
+        member_id:
+          type: integer
+          description: 'ID Тимура (Member.id).'
+        name:
+          type: string
+          description: 'Имя и фамилия Тимура.'
+        phone:
+          type: string
+          description: 'Номер телефона Тимура (ожидается 89031221111).'
+        cash_balance_before:
+          type: string
+          format: decimal
+          description: 'Баланс денежных средств Тимура в рублях до симуляции.'
+        cash_balance_after:
+          type: string
+          format: decimal
+          description: 'Баланс денежных средств Тимура в рублях после симуляции.'
+        earnings_delta:
+          type: string
+          format: decimal
+          description: 'Изменение денежного баланса Тимура в результате демо-депозитов.'
+      required:
+        - member_id
+        - name
+        - phone
+        - cash_balance_before
+        - cash_balance_after
+        - earnings_delta
+    SimulateDemoDepositsResponse:
+      type: object
+      description: 'Ответ тестового эндпоинта симуляции демо-депозитов для Амир и Альфира и расчёта заработка Тимура.'
+      properties:
+        players:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulateDemoDepositsPlayer'
+        timur:
+          $ref: '#/components/schemas/SimulateDemoDepositsTimur'
+      required:
+        - players
+        - timур
   securitySchemes:
     basicAuth:
       type: http

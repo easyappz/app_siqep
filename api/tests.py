@@ -19,6 +19,7 @@ from .models import (
     INFLUENCER_DEPTH_BASE_BONUS_CASH,
     INFLUENCER_DEPOSIT_PERCENT,
     MemberAuthToken,
+    ReferralEvent,
 )
 from .referral_utils import (
     get_rank_multiplier,
@@ -341,3 +342,141 @@ class TestSimulateDepositsAPITests(TestCase):
 
         response = client.post(self.url, {}, format="json")
         self.assertEqual(response.status_code, 403)
+
+
+class TestSimulateDemoDepositsAPITests(TestCase):
+    """Tests for the demo simulate-deposits endpoint with Timur earnings."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.url = "/api/test/simulate_demo_deposits/"
+
+        # Ensure test members for Amir and Alfirа are clean
+        Member.objects.filter(
+            phone__in=["+79990000001", "+79990000002"],
+        ).delete()
+
+        # Ensure Timur exists with canonical phone and influencer status
+        self.timur, _ = Member.objects.get_or_create(
+            phone="89031221111",
+            defaults={
+                "first_name": "Тимур",
+                "last_name": "Комаров",
+                "email": None,
+                "is_influencer": True,
+                "is_admin": False,
+                "user_type": USER_TYPE_INFLUENCER,
+            },
+        )
+        timur_updated_fields = []
+        if not self.timur.is_influencer:
+            self.timur.is_influencer = True
+            timur_updated_fields.append("is_influencer")
+        if self.timur.user_type != USER_TYPE_INFLUENCER:
+            self.timur.user_type = USER_TYPE_INFLUENCER
+            timur_updated_fields.append("user_type")
+        if timur_updated_fields:
+            self.timur.save(update_fields=timur_updated_fields)
+
+        # Create admin and auth token
+        self.admin, _ = Member.objects.get_or_create(
+            phone="+79990009999",
+            defaults={
+                "first_name": "Admin",
+                "last_name": "User",
+                "email": None,
+                "is_influencer": False,
+                "is_admin": True,
+            },
+        )
+        if not self.admin.is_admin:
+            self.admin.is_admin = True
+            self.admin.save(update_fields=["is_admin"])
+
+        token = MemberAuthToken.create_for_member(self.admin)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+    def test_simulate_demo_deposits_creates_deposits_and_updates_timur(self):
+        timur_before = self.timur.cash_balance
+
+        response = self.client.post(self.url, {"amount": 2000}, format="json")
+        self.assertEqual(response.status_code, 200)
+
+        data = response.json()
+        self.assertIn("players", data)
+        self.assertIn("timur", data)
+
+        players = data["players"]
+        self.assertEqual(len(players), 2)
+
+        phones_seen = set()
+        for player in players:
+            phone = player["phone"]
+            phones_seen.add(phone)
+            self.assertIn(phone, ["+79990000001", "+79990000002"])
+
+            deposits = player.get("deposits", [])
+            self.assertEqual(len(deposits), 1)
+            self.assertEqual(deposits[0]["amount"], 2000)
+            self.assertIn("id", deposits[0])
+            self.assertIn("created_at", deposits[0])
+
+            member = Member.objects.get(phone=phone)
+            # Ensure a ReferralEvent with deposit_amount=2000 exists for this member
+            self.assertTrue(
+                ReferralEvent.objects.filter(
+                    referred=member,
+                    deposit_amount=2000,
+                ).exists()
+            )
+
+        self.assertEqual(phones_seen, {"+79990000001", "+79990000002"})
+
+        self.timur.refresh_from_db()
+        self.assertGreater(self.timur.cash_balance, timur_before)
+
+        timur_data = data["timur"]
+        self.assertEqual(timur_data["member_id"], self.timur.id)
+        self.assertEqual(timur_data["phone"], "89031221111")
+
+        earnings_delta = Decimal(str(timur_data["earnings_delta"]))
+        self.assertGreater(earnings_delta, Decimal("0"))
+
+    def test_simulate_demo_deposits_is_idempotent(self):
+        # First call creates demo deposits
+        response1 = self.client.post(self.url, {"amount": 2000}, format="json")
+        self.assertEqual(response1.status_code, 200)
+
+        # Capture ReferralEvent counts after first call
+        players_phones = ["+79990000001", "+79990000002"]
+        first_counts = {}
+        for phone in players_phones:
+            member = Member.objects.get(phone=phone)
+            first_counts[phone] = ReferralEvent.objects.filter(
+                referred=member,
+                deposit_amount=2000,
+            ).count()
+
+        self.timur.refresh_from_db()
+        timur_after_first = self.timur.cash_balance
+
+        # Second call should not create additional deposits or change Timur balance
+        response2 = self.client.post(self.url, {"amount": 2000}, format="json")
+        self.assertEqual(response2.status_code, 200)
+        data2 = response2.json()
+
+        self.timur.refresh_from_db()
+        timur_after_second = self.timur.cash_balance
+        self.assertEqual(timur_after_second, timur_after_first)
+
+        timur_data = data2["timur"]
+        earnings_delta = Decimal(str(timur_data["earnings_delta"]))
+        self.assertEqual(earnings_delta, Decimal("0.00"))
+
+        for phone in players_phones:
+            member = Member.objects.get(phone=phone)
+            second_count = ReferralEvent.objects.filter(
+                referred=member,
+                deposit_amount=2000,
+            ).count()
+            self.assertEqual(second_count, first_counts[phone])

@@ -634,3 +634,53 @@ class TestSimulateDepositsResponseSerializer(serializers.Serializer):
 
     status = serializers.CharField()
     deposits = TestMemberDepositResultSerializer(many=True)
+
+
+class SimulateDemoDepositsRequestSerializer(serializers.Serializer):
+    """Request payload for demo deposits simulation for Amir and Alfirа."""
+
+    amount = serializers.IntegerField(
+        required=False,
+        min_value=1,
+        help_text=(
+            "Сумма депозита в рублях для каждого игрока. По умолчанию 2000."
+        ),
+        error_messages={
+            "min_value": "Сумма депозита должна быть положительным числом.",
+        },
+    )
+
+
+class SimulateDemoDepositsPlayerDepositSerializer(serializers.Serializer):
+    """Single deposit summary for a demo player."""
+
+    id = serializers.IntegerField()
+    amount = serializers.IntegerField()
+    created_at = serializers.DateTimeField()
+
+
+class SimulateDemoDepositsPlayerSerializer(serializers.Serializer):
+    """Player (Амир or Альфира) with associated demo deposits."""
+
+    member_id = serializers.IntegerField()
+    name = serializers.CharField()
+    phone = serializers.CharField()
+    deposits = SimulateDemoDepositsPlayerDepositSerializer(many=True)
+
+
+class SimulateDemoDepositsTimurSerializer(serializers.Serializer):
+    """Timur earnings summary for the demo deposits scenario."""
+
+    member_id = serializers.IntegerField()
+    name = serializers.CharField()
+    phone = serializers.CharField()
+    cash_balance_before = serializers.DecimalField(max_digits=12, decimal_places=2)
+    cash_balance_after = serializers.DecimalField(max_digits=12, decimal_places=2)
+    earnings_delta = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
+class SimulateDemoDepositsResponseSerializer(serializers.Serializer):
+    """Response schema for the demo deposits simulation endpoint."""
+
+    players = SimulateDemoDepositsPlayerSerializer(many=True)
+    timur = SimulateDemoDepositsTimurSerializer()
