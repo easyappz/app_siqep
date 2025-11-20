@@ -110,7 +110,61 @@ const RegisterPage = () => {
       navigate('/login');
     } catch (error) {
       console.error('Registration error', error);
-      setErrorMessage('Произошла ошибка при регистрации. Пожалуйста, проверьте данные и попробуйте снова.');
+
+      // Try to extract a meaningful validation message from backend response
+      const response = error && error.response ? error.response : null;
+      const data = response && response.data ? response.data : null;
+
+      if (data) {
+        let message = '';
+
+        // Helper to extract first string from an array or value
+        const pickFirst = (value) => {
+          if (Array.isArray(value) && value.length > 0) {
+            return String(value[0]);
+          }
+          if (typeof value === 'string') {
+            return value;
+          }
+          return '';
+        };
+
+        if (!message && Object.prototype.hasOwnProperty.call(data, 'phone')) {
+          message = pickFirst(data.phone);
+        }
+        if (!message && Object.prototype.hasOwnProperty.call(data, 'email')) {
+          message = pickFirst(data.email);
+        }
+        if (!message && Object.prototype.hasOwnProperty.call(data, 'referral_code')) {
+          message = pickFirst(data.referral_code);
+        }
+        if (!message && Object.prototype.hasOwnProperty.call(data, 'non_field_errors')) {
+          message = pickFirst(data.non_field_errors);
+        }
+        if (!message && Object.prototype.hasOwnProperty.call(data, 'detail')) {
+          message = pickFirst(data.detail);
+        }
+
+        if (!message) {
+          // As a fallback, try to take the first string value from the object
+          const values = Object.values(data);
+          for (let i = 0; i < values.length; i += 1) {
+            const candidate = pickFirst(values[i]);
+            if (candidate) {
+              message = candidate;
+              break;
+            }
+          }
+        }
+
+        if (message) {
+          setErrorMessage(message);
+        } else {
+          setErrorMessage('Произошла ошибка при регистрации. Пожалуйста, проверьте данные и попробуйте снова.');
+        }
+      } else {
+        setErrorMessage('Произошла ошибка при регистрации. Пожалуйста, проверьте данные и попробуйте снова.');
+      }
     } finally {
       setIsSubmitting(false);
     }
