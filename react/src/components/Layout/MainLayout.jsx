@@ -18,7 +18,7 @@ const MainLayout = ({ children }) => {
     >
       <header className="layout-header">
         <div className="container layout-header-inner">
-          <div className="layout-logo">Referral Service</div>
+          <div className="layout-logo">Poker Club Referral</div>
 
           <nav className="layout-nav">
             <NavLink

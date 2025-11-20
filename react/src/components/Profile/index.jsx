@@ -119,7 +119,8 @@ const ProfilePage = () => {
           <section className="card profile-header-card">
             <h1 className="page-title">Профиль пользователя</h1>
             <p className="page-subtitle">
-              Отслеживайте эффективность вашей реферальной программы в реальном времени.
+              Статистика по реферальной программе покерного клуба: сколько игроков вы привели
+              и сколько бесплатных стеков или денег заработали.
             </p>
 
             <div className="profile-info-grid">
@@ -171,8 +172,9 @@ const ProfilePage = () => {
           <section className="card profile-referral-card">
             <h2 className="profile-section-title">Ваша реферальная ссылка</h2>
             <p className="profile-section-text">
-              Отправьте эту ссылку друзьям или клиентам. За каждую регистрацию вы получаете
-              бонусы, а инфлюенсеры — деньги.
+              Отправьте эту ссылку друзьям, гостям клуба или своей аудитории. Новые игроки
+              приходят в офлайн покерный клуб по вашей ссылке, а система автоматически
+              начисляет вам бесплатные стеки или деньги в зависимости от типа аккаунта.
             </p>
 
             <div className="profile-referral-input-row">
@@ -193,6 +195,22 @@ const ProfilePage = () => {
             </div>
 
             {copyStatus && <div className="profile-copy-status">{copyStatus}</div>}
+
+            <p className="profile-section-text">
+              <strong>Правила программы.</strong> Игроки клуба получают 1 бесплатный
+              стартовый стек (1000 ₽ участие в турнире) за каждого нового игрока, который
+              впервые приходит в клуб по их ссылке. Инфлюенсеры получают 1000 ₽ за первый
+              турнир реферала и 10% со всех его дальнейших депозитов на фишки.
+            </p>
+            <p className="profile-section-text">
+              Статистика ниже (график и история начислений) помогает видеть динамику ваших
+              приглашений, бесплатных стеков и денежного дохода.
+            </p>
+            <p className="profile-section-text">
+              Пример: вы привели 5 новых игроков как инфлюенсер → минимум 5 000 ₽ за их
+              первые турниры + дополнительный доход, если они продолжают играть и докупать
+              фишки.
+            </p>
           </section>
         </div>
 
@@ -219,7 +237,8 @@ const ProfilePage = () => {
               <div className="profile-stat-label">Количество рефералов</div>
               <div className="profile-stat-value">{totalReferrals}</div>
               <div className="profile-stat-caption">
-                Все пользователи, зарегистрировавшиеся по вашей ссылке
+                Все игроки, которые впервые пришли в покерный клуб по вашей реферальной
+                ссылке.
               </div>
             </div>
 
@@ -227,15 +246,16 @@ const ProfilePage = () => {
               <div className="profile-stat-label">Активные рефералы</div>
               <div className="profile-stat-value">{activeReferrals}</div>
               <div className="profile-stat-caption">
-                Рефералы, которые совершили хотя бы один депозит
+                Рефералы, которые посещали клуб или делали депозиты на фишки за последние 30
+                дней.
               </div>
             </div>
 
             <div className="card profile-stat-card">
-              <div className="profile-stat-label">Заработано бонусов</div>
+              <div className="profile-stat-label">Заработано бесплатных стеков</div>
               <div className="profile-stat-value">{totalBonusPoints}</div>
               <div className="profile-stat-caption">
-                1 бонус за каждого привлеченного клиента
+                Каждый бонус = один бесплатный стартовый стек (1000 ₽ участие в турнире).
               </div>
             </div>
 
@@ -244,7 +264,8 @@ const ProfilePage = () => {
                 <div className="profile-stat-label">Заработано денег</div>
                 <div className="profile-stat-value">{`${totalMoneyEarned} ₽`}</div>
                 <div className="profile-stat-caption">
-                  20% с каждого депозита привлеченных клиентов
+                  1000 ₽ за первый турнир каждого реферала + 10% с последующих депозитов на
+                  фишки.
                 </div>
               </div>
             )}
@@ -255,7 +276,7 @@ const ProfilePage = () => {
           <div className="profile-chart-header">
             <h2 className="profile-section-title">График регистраций</h2>
             <p className="profile-section-text">
-              Динамика привлечения новых пользователей по вашей реферальной ссылке.
+              Динамика привлечения новых игроков по вашей реферальной ссылке.
             </p>
           </div>
 
@@ -328,7 +349,8 @@ const ProfilePage = () => {
           <div className="profile-history-header">
             <h2 className="profile-section-title">История начислений</h2>
             <p className="profile-section-text">
-              Подробная история бонусов и денежных начислений по вашим рефералам.
+              Подробная история бесплатных стеков и денежных начислений по вашим рефералам в
+              покерном клубе.
             </p>
           </div>
 
