@@ -15,12 +15,20 @@ import {
   Cell,
 } from 'recharts';
 import { fetchAdminStatsOverview } from '../../api/admin';
-import { simulateAmirAlfiraDeposits } from '../../api/test';
+import { simulateDemoDeposits } from '../../api/test';
 
 const influencerColor = '#ff6cab';
 const regularColor = '#4f46e5';
 const gridColor = '#e5e7eb';
 const pieColors = [influencerColor, regularColor];
+
+const formatCurrency = (value) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return '0 ₽';
+  }
+
+  return `${value} ₽`;
+};
 
 const AdminOverviewPage = () => {
   const [stats, setStats] = useState(null);
@@ -28,8 +36,8 @@ const AdminOverviewPage = () => {
   const [error, setError] = useState('');
 
   const [simulateLoading, setSimulateLoading] = useState(false);
-  const [simulateError, setSimulateError] = useState('');
   const [simulateResult, setSimulateResult] = useState(null);
+  const [simulateError, setSimulateError] = useState('');
 
   useEffect(() => {
     let isCancelled = false;
@@ -62,19 +70,36 @@ const AdminOverviewPage = () => {
     };
   }, []);
 
-  const handleSimulateDeposits = async () => {
+  const handleSimulateDemoDeposits = async () => {
     setSimulateError('');
     setSimulateResult(null);
     setSimulateLoading(true);
 
     try {
-      const data = await simulateAmirAlfiraDeposits();
+      const data = await simulateDemoDeposits();
       setSimulateResult(data || null);
     } catch (err) {
-      console.error('Failed to simulate deposits for Amir and Alfirа', err);
-      setSimulateError(
-        'Ошибка при моделировании депозитов. Попробуйте позже или проверьте права доступа.'
-      );
+      console.error('Failed to simulate demo deposits for Amir and Alfirа', err);
+
+      let message = 'Не удалось выполнить симуляцию депозитов. Попробуйте позже.';
+
+      if (err && err.response && err.response.data) {
+        const responseData = err.response.data;
+
+        if (typeof responseData.detail === 'string') {
+          message = responseData.detail;
+        } else if (typeof responseData.error === 'string') {
+          message = responseData.error;
+        } else if (
+          Array.isArray(responseData.non_field_errors) &&
+          responseData.non_field_errors.length > 0 &&
+          typeof responseData.non_field_errors[0] === 'string'
+        ) {
+          message = responseData.non_field_errors[0];
+        }
+      }
+
+      setSimulateError(message);
     } finally {
       setSimulateLoading(false);
     }
@@ -128,9 +153,21 @@ const AdminOverviewPage = () => {
     registrationsData.length || topReferrersData.length || incomeStats.total_income
   );
 
-  const simulateDeposits = simulateResult && Array.isArray(simulateResult.deposits)
-    ? simulateResult.deposits
+  const players = Array.isArray(simulateResult?.players)
+    ? simulateResult.players
     : [];
+
+  const timur = simulateResult?.timur || null;
+
+  let earningsDelta = 0;
+
+  if (timur) {
+    if (typeof timur.earnings_delta === 'number') {
+      earningsDelta = timur.earnings_delta;
+    } else if (typeof timur.delta === 'number') {
+      earningsDelta = timur.delta;
+    }
+  }
 
   return (
     <main
@@ -142,111 +179,7 @@ const AdminOverviewPage = () => {
         <p className="section-subtitle">
           Регистрации по дням, топ рефереров и выручка по депозитам из реферальных ссылок.
         </p>
-
-        <div className="admin-section-actions">
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={handleSimulateDeposits}
-            disabled={simulateLoading}
-          >
-            {simulateLoading
-              ? 'Моделирование депозитов...'
-              : 'Смоделировать депозиты для Амира и Альфиры (по 2000 ₽)'}
-          </button>
-          <p className="admin-section-helper">
-            Кнопка предназначена для тестового режима: создаёт или обновляет депозиты
-            для пользователей «Амир» и «Альфира», показывая, как начисляются V-Coins и деньги
-            по реферальной программе.
-          </p>
-        </div>
       </div>
-
-      {simulateError && (
-        <div className="card admin-error">
-          <p>{simulateError}</p>
-        </div>
-      )}
-
-      {simulateResult && (
-        <section className="card admin-table-card">
-          <div className="admin-table-header">
-            <div>
-              <h3 className="admin-table-title">Результаты моделирования депозитов</h3>
-              <p className="admin-table-subtitle">
-                Статус операции: {simulateResult.status || '—'}
-              </p>
-            </div>
-          </div>
-
-          {simulateDeposits.length === 0 ? (
-            <p className="admin-table-empty">
-              Данные по смоделированным депозитам отсутствуют.
-            </p>
-          ) : (
-            <div className="table-wrapper">
-              <table className="table admin-table">
-                <thead>
-                  <tr>
-                    <th>ID пользователя</th>
-                    <th>Имя</th>
-                    <th>Телефон</th>
-                    <th>Сумма депозита</th>
-                    <th>Баланс V-Coins</th>
-                    <th>Баланс денег, ₽</th>
-                    <th>Новые реферальные изменения</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {simulateDeposits.map((item, index) => {
-                    const member = item.member || {};
-                    const fullName = `${member.first_name || ''} ${member.last_name || ''}`.trim() || '—';
-                    const phone = member.phone || '—';
-                    const amount = typeof item.amount === 'number' ? item.amount : 2000;
-
-                    const vCoinsAfter =
-                      typeof item.v_coins_balance_after !== 'undefined'
-                        ? item.v_coins_balance_after
-                        : member.v_coins_balance;
-
-                    const cashAfter =
-                      typeof item.cash_balance_after !== 'undefined'
-                        ? item.cash_balance_after
-                        : member.cash_balance;
-
-                    const referralChanges = Array.isArray(item.referral_changes)
-                      ? item.referral_changes
-                      : [];
-
-                    return (
-                      <tr key={member.id || index}>
-                        <td>{member.id || '—'}</td>
-                        <td>{fullName}</td>
-                        <td>{phone}</td>
-                        <td>{amount} ₽</td>
-                        <td>{vCoinsAfter || '0'}</td>
-                        <td>{cashAfter || '0'} ₽</td>
-                        <td>
-                          {referralChanges.length === 0 && 'Без изменений'}
-                          {referralChanges.length > 0 && (
-                            <ul className="admin-referral-changes-list">
-                              {referralChanges.map((change, changeIndex) => (
-                                <li key={`${change.ancestor_id || 'a'}-${change.level || 0}-${changeIndex}`}>
-                                  Предок ID {change.ancestor_id}, уровень {change.level}
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-      )}
 
       {loading && (
         <div className="card admin-loading">
@@ -320,7 +253,10 @@ const AdminOverviewPage = () => {
               </p>
               <div className="admin-chart-wrapper">
                 <ResponsiveContainer width="100%" height={260}>
-                  <LineChart data={registrationsData} margin={{ top: 10, right: 16, bottom: 0, left: 0 }}>
+                  <LineChart
+                    data={registrationsData}
+                    margin={{ top: 10, right: 16, bottom: 0, left: 0 }}
+                  >
                     <CartesianGrid stroke={gridColor} strokeDasharray="3 3" />
                     <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                     <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
@@ -408,6 +344,137 @@ const AdminOverviewPage = () => {
           </section>
         </>
       )}
+
+      <section className="card admin-simulation-card">
+        <div className="admin-simulation-header">
+          <h3 className="section-title">Тестовая симуляция депозитов</h3>
+          <p className="admin-simulation-description">
+            В тестовом режиме создаёт два депозита по 2000 ₽ для игроков «Амир» и «Альфира» и
+            показывает, как изменяется доход инфлюенсера Тимура по реферальной программе.
+          </p>
+        </div>
+
+        <div className="admin-simulation-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleSimulateDemoDeposits}
+            disabled={simulateLoading}
+          >
+            {simulateLoading
+              ? 'Выполняется симуляция...'
+              : 'Симулировать депозиты Амир и Альфира (по 2000 ₽)'}
+          </button>
+        </div>
+
+        {simulateError && (
+          <div className="admin-simulation-error">
+            <strong>Ошибка симуляции: </strong>
+            <span>{simulateError}</span>
+          </div>
+        )}
+
+        {simulateResult && (
+          <div className="admin-simulation-result">
+            <h4 className="admin-simulation-block-title">Результаты симуляции</h4>
+
+            <div className="admin-simulation-result-grid">
+              <div className="admin-simulation-block">
+                <h5 className="admin-simulation-block-title">Игроки</h5>
+                {players.length === 0 ? (
+                  <p className="admin-simulation-meta">Данные по игрокам отсутствуют.</p>
+                ) : (
+                  <ul className="admin-simulation-list">
+                    {players.map((player, index) => {
+                      const memberId = player.member_id || player.id || null;
+
+                      const nameFromFields = `${player.first_name || ''} ${
+                        player.last_name || ''
+                      }`.trim();
+                      const playerName = player.name || nameFromFields || 'Игрок';
+
+                      const depositsArray = Array.isArray(player.deposits)
+                        ? player.deposits
+                        : [];
+
+                      let totalDepositAmount = 0;
+
+                      if (depositsArray.length > 0) {
+                        totalDepositAmount = depositsArray.reduce((sum, deposit) => {
+                          const depositAmount =
+                            typeof deposit.amount === 'number' ? deposit.amount : 0;
+                          return sum + depositAmount;
+                        }, 0);
+                      } else if (typeof player.deposit_amount === 'number') {
+                        totalDepositAmount = player.deposit_amount;
+                      } else if (typeof player.total_deposit === 'number') {
+                        totalDepositAmount = player.total_deposit;
+                      }
+
+                      const depositsCount = depositsArray.length;
+                      const depositsCountText =
+                        depositsCount > 1
+                          ? ` (количество депозитов: ${depositsCount})`
+                          : '';
+
+                      return (
+                        <li
+                          key={memberId || playerName || `player-${index}`}
+                        >
+                          <div>
+                            <strong>{playerName}</strong>
+                            {memberId && (
+                              <span className="admin-simulation-meta">
+                                {' '}
+                                (ID {memberId})
+                              </span>
+                            )}
+                          </div>
+                          <div className="admin-simulation-meta">
+                            Сумма депозитов: {formatCurrency(totalDepositAmount)}
+                            {depositsCountText}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+
+              <div className="admin-simulation-block">
+                <h5 className="admin-simulation-block-title">Инфлюенсер</h5>
+                {timur ? (
+                  <div>
+                    <p>
+                      <strong>{timur.name || 'Тимур'}</strong>
+                      {timur.member_id && (
+                        <span className="admin-simulation-meta">
+                          {' '}
+                          (ID {timur.member_id})
+                        </span>
+                      )}
+                    </p>
+                    <p className="admin-simulation-meta">
+                      Изменение заработка: {formatCurrency(earningsDelta)}
+                    </p>
+                    {typeof timur.earnings_before === 'number' &&
+                      typeof timur.earnings_after === 'number' && (
+                        <p className="admin-simulation-meta">
+                          Было: {formatCurrency(timur.earnings_before)} → Стало:{' '}
+                          {formatCurrency(timur.earnings_after)}
+                        </p>
+                      )}
+                  </div>
+                ) : (
+                  <p className="admin-simulation-meta">
+                    Данные по инфлюенсеру Тимуру отсутствуют.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
     </main>
   );
 };
