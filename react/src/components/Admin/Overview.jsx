@@ -113,7 +113,7 @@ const AdminOverviewPage = () => {
       <div className="card admin-section-header">
         <h2 className="section-title">Общая статистика</h2>
         <p className="section-subtitle">
-          Регистрации по дням, топ рефереров и доход по источникам.
+          Регистрации по дням, топ рефереров и выручка по депозитам из реферальных ссылок.
         </p>
       </div>
 
@@ -150,7 +150,9 @@ const AdminOverviewPage = () => {
                 {incomeStats.total_income} 
                 <span className="admin-stat-unit">₽</span>
               </p>
-              <p className="admin-stat-caption">Все источники (инфлюенсеры и пользователи)</p>
+              <p className="admin-stat-caption">
+                Суммарная выручка по депозитам (стеки и докупки по реферальным ссылкам)
+              </p>
             </div>
 
             <div className="card admin-stat-card">
@@ -159,7 +161,9 @@ const AdminOverviewPage = () => {
                 {incomeStats.income_from_influencers} 
                 <span className="admin-stat-unit">₽</span>
               </p>
-              <p className="admin-stat-caption">Клиенты, привлечённые инфлюенсерами</p>
+              <p className="admin-stat-caption">
+                Сумма депозитов клиентов, пришедших по ссылкам инфлюенсеров
+              </p>
             </div>
 
             <div className="card admin-stat-card">
@@ -168,7 +172,9 @@ const AdminOverviewPage = () => {
                 {incomeStats.income_from_regular_users} 
                 <span className="admin-stat-unit">₽</span>
               </p>
-              <p className="admin-stat-caption">Клиенты, привлечённые обычными пользователями</p>
+              <p className="admin-stat-caption">
+                Сумма депозитов клиентов, пришедших по ссылкам обычных пользователей
+              </p>
             </div>
           </section>
 
@@ -176,7 +182,7 @@ const AdminOverviewPage = () => {
             <div className="card admin-chart-card">
               <h3 className="admin-chart-title">Регистрации по дням</h3>
               <p className="admin-chart-subtitle">
-                Динамика регистраций новых клиентов по реферальным ссылкам.
+                Регистрации и первые визиты по реферальным ссылкам.
               </p>
               <div className="admin-chart-wrapper">
                 <ResponsiveContainer width="100%" height={260}>
@@ -242,7 +248,7 @@ const AdminOverviewPage = () => {
             <div className="card admin-chart-card admin-chart-card-wide">
               <h3 className="admin-chart-title">Доход по источникам</h3>
               <p className="admin-chart-subtitle">
-                Сравнение дохода от инфлюенсеров и обычных пользователей.
+                Сравнение суммарных депозитов (стеки и докупки) по источникам трафика.
               </p>
               <div className="admin-chart-wrapper admin-chart-wrapper-pie">
                 <ResponsiveContainer width="100%" height={260}>

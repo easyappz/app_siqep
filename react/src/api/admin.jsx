@@ -20,6 +20,11 @@ export async function fetchAdminReferrals(params = {}) {
   return response.data;
 }
 
+export async function createAdminReferralEvent(data) {
+  const response = await instance.post('/api/admin/referrals/', data);
+  return response.data;
+}
+
 export async function fetchAdminStatsOverview() {
   const response = await instance.get('/api/admin/stats/overview/');
   return response.data;

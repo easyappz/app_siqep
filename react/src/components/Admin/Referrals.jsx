@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { fetchAdminReferrals } from '../../api/admin';
+import { fetchAdminReferrals, createAdminReferralEvent } from '../../api/admin';
 
 const AdminReferralsPage = () => {
   const [referrals, setReferrals] = useState([]);
@@ -12,6 +12,13 @@ const AdminReferralsPage = () => {
   const [typeFilter, setTypeFilter] = useState('all');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
+
+  const [createReferredId, setCreateReferredId] = useState('');
+  const [createDepositAmount, setCreateDepositAmount] = useState('1000');
+  const [createDateTime, setCreateDateTime] = useState('');
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [createSuccess, setCreateSuccess] = useState('');
 
   const loadReferrals = async (pageParam, options) => {
     setLoading(true);
@@ -86,6 +93,81 @@ const AdminReferralsPage = () => {
     }
   };
 
+  const handleCreateReferralEvent = async (event) => {
+    event.preventDefault();
+
+    setCreateError('');
+    setCreateSuccess('');
+
+    const referredIdNumber = Number(createReferredId);
+    const depositAmountNumber = Number(createDepositAmount);
+
+    if (!createReferredId || Number.isNaN(referredIdNumber) || referredIdNumber <= 0) {
+      setCreateError('Укажите корректный ID реферала (положительное число).');
+      return;
+    }
+
+    if (!createDepositAmount || Number.isNaN(depositAmountNumber) || depositAmountNumber <= 0) {
+      setCreateError('Укажите корректную сумму депозита (положительное число).');
+      return;
+    }
+
+    const payload = {
+      referred_id: referredIdNumber,
+      deposit_amount: depositAmountNumber,
+    };
+
+    if (createDateTime) {
+      try {
+        const createdAtIso = new Date(createDateTime).toISOString();
+        if (createdAtIso && createdAtIso !== 'Invalid Date') {
+          payload.created_at = createdAtIso;
+        }
+      } catch (dateError) {
+        // Если дата некорректна, просто не отправляем поле created_at
+      }
+    }
+
+    setCreateLoading(true);
+
+    try {
+      await createAdminReferralEvent(payload);
+
+      setCreateSuccess('Реферальное событие успешно создано.');
+      setCreateReferredId('');
+      setCreateDepositAmount('1000');
+      setCreateDateTime('');
+
+      await loadReferrals(page, { typeFilter, fromDate, toDate });
+    } catch (err) {
+      console.error('Failed to create admin referral event', err);
+
+      let message =
+        'Не удалось создать реферальное событие. Проверьте данные и попробуйте снова.';
+
+      if (err && err.response && err.response.data) {
+        const serverData = err.response.data;
+
+        if (typeof serverData === 'string') {
+          message = `Ошибка сервера: ${serverData}`;
+        } else if (serverData.detail && typeof serverData.detail === 'string') {
+          message = `Ошибка: ${serverData.detail}`;
+        } else if (
+          serverData.non_field_errors &&
+          Array.isArray(serverData.non_field_errors) &&
+          serverData.non_field_errors.length > 0 &&
+          typeof serverData.non_field_errors[0] === 'string'
+        ) {
+          message = `Ошибка: ${serverData.non_field_errors[0]}`;
+        }
+      }
+
+      setCreateError(message);
+    } finally {
+      setCreateLoading(false);
+    }
+  };
+
   const formatDateTime = (isoValue) => {
     if (!isoValue) {
       return '';
@@ -107,7 +189,7 @@ const AdminReferralsPage = () => {
       <section className="card admin-section-header">
         <h2 className="section-title">Реферальные события</h2>
         <p className="section-subtitle">
-          Все регистрации по реферальным ссылкам и начисленные бонусы.
+          Все регистрации по реферальным ссылкам, депозиты и начисленные бонусы.
         </p>
       </section>
 
@@ -157,6 +239,82 @@ const AdminReferralsPage = () => {
             />
           </div>
         </div>
+      </section>
+
+      <section className="card admin-form-card">
+        <h3 className="admin-form-title">Добавить депозит по реферальной ссылке</h3>
+        <p className="admin-form-subtitle">
+          Укажите ID приглашённого игрока и сумму депозита (стоимость стека или докупки).
+          Вознаграждение рефереру будет рассчитано автоматически по правилам для игроков
+          и инфлюенсеров.
+        </p>
+
+        {createError && <p className="admin-form-error">{createError}</p>}
+        {createSuccess && <p className="admin-form-success">{createSuccess}</p>}
+
+        <form className="admin-form" onSubmit={handleCreateReferralEvent}>
+          <div className="admin-form-grid">
+            <div className="admin-form-field">
+              <label className="admin-form-label" htmlFor="createReferredId">
+                ID реферала
+              </label>
+              <input
+                id="createReferredId"
+                type="number"
+                className="admin-form-input"
+                value={createReferredId}
+                onChange={(event) => setCreateReferredId(event.target.value)}
+                placeholder="Например, 102"
+                min="1"
+              />
+              <p className="admin-form-help">
+                ID можно посмотреть в разделе «Пользователи».
+              </p>
+            </div>
+
+            <div className="admin-form-field">
+              <label className="admin-form-label" htmlFor="createDepositAmount">
+                Сумма депозита, ₽
+              </label>
+              <input
+                id="createDepositAmount"
+                type="number"
+                className="admin-form-input"
+                value={createDepositAmount}
+                onChange={(event) => setCreateDepositAmount(event.target.value)}
+                min="1"
+                step="1"
+              />
+              <p className="admin-form-help">По умолчанию равна стоимости одного стека.</p>
+            </div>
+
+            <div className="admin-form-field">
+              <label className="admin-form-label" htmlFor="createDateTime">
+                Дата и время (необязательно)
+              </label>
+              <input
+                id="createDateTime"
+                type="datetime-local"
+                className="admin-form-input"
+                value={createDateTime}
+                onChange={(event) => setCreateDateTime(event.target.value)}
+              />
+              <p className="admin-form-help">
+                Если не заполнено, будет использовано текущее время создания события.
+              </p>
+            </div>
+          </div>
+
+          <div className="admin-form-actions">
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={createLoading}
+            >
+              {createLoading ? 'Создание...' : 'Зафиксировать депозит'}
+            </button>
+          </div>
+        </form>
       </section>
 
       <section className="card admin-table-card">
