@@ -121,7 +121,7 @@ const AdminUsersPage = () => {
       );
     } catch (err) {
       console.error('Failed to update member flags', err);
-      setUpdateError('Не удалось обновить права пользователя. Попробуйте позже.');
+      setUpdateError('Не удалось обновить статус пользователя. Попробуйте позже.');
     }
   };
 
@@ -145,14 +145,14 @@ const AdminUsersPage = () => {
       <section className="card admin-section-header">
         <h2 className="section-title">Пользователи</h2>
         <p className="section-subtitle">
-          Управление учетными записями пользователей и инфлюенсеров.
+          Управление учетными записями игроков, инфлюенсеров и администраторов.
         </p>
       </section>
 
       <section className="card admin-form-card">
         <h3 className="admin-form-title">Создать нового пользователя</h3>
         <p className="admin-form-subtitle">
-          Используйте эту форму, чтобы заводить аккаунты инфлюенсеров и администраторов.
+          Используйте эту форму, чтобы заводить аккаунты игроков, инфлюенсеров и администраторов.
         </p>
 
         <form className="admin-form-grid" onSubmit={handleCreateMember}>
@@ -274,6 +274,11 @@ const AdminUsersPage = () => {
             <p className="admin-table-subtitle">
               Всего пользователей: {count}
             </p>
+            <p className="admin-table-helper">
+              Если отметить игрока как инфлюенсера, все его будущие реферальные депозиты
+              будут начисляться по правилам программы для инфлюенсеров. Уже созданные
+              реферальные события не изменятся.
+            </p>
           </div>
         </div>
 
@@ -300,6 +305,7 @@ const AdminUsersPage = () => {
                   <th>Кол-во рефералов</th>
                   <th>Бонусы</th>
                   <th>Заработано денег</th>
+                  <th>Инфлюенсер-программа</th>
                   <th>Инфлюенсер</th>
                   <th>Админ</th>
                 </tr>
@@ -307,7 +313,7 @@ const AdminUsersPage = () => {
               <tbody>
                 {members.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="admin-table-empty">
+                    <td colSpan={12} className="admin-table-empty">
                       Пользователи не найдены.
                     </td>
                   </tr>
@@ -315,7 +321,14 @@ const AdminUsersPage = () => {
 
                 {members.map((member) => (
                   <tr key={member.id}>
-                    <td>{member.first_name}</td>
+                    <td>
+                      <div className="admin-member-name-cell">
+                        <span>{member.first_name}</span>
+                        {member.is_influencer && (
+                          <span className="admin-badge admin-badge-influencer">Инфлюенсер</span>
+                        )}
+                      </div>
+                    </td>
                     <td>{member.last_name}</td>
                     <td>{member.phone}</td>
                     <td>{member.email || '—'}</td>
@@ -324,6 +337,29 @@ const AdminUsersPage = () => {
                     <td>{member.total_referrals}</td>
                     <td>{member.total_bonus_points}</td>
                     <td>{member.total_money_earned} ₽</td>
+                    <td>
+                      {member.is_influencer ? (
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() =>
+                            handleToggleFlag(member.id, 'is_influencer', false)
+                          }
+                        >
+                          Снять статус инфлюенсера
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          onClick={() =>
+                            handleToggleFlag(member.id, 'is_influencer', true)
+                          }
+                        >
+                          Сделать инфлюенсером
+                        </button>
+                      )}
+                    </td>
                     <td>
                       <input
                         type="checkbox"

@@ -209,7 +209,7 @@ const AdminReferralsPage = () => {
             >
               <option value="all">Все</option>
               <option value="influencers">Только инфлюенсеры</option>
-              <option value="regular">Только обычные</option>
+              <option value="regular">Только обычные игроки</option>
             </select>
           </div>
 
@@ -363,7 +363,7 @@ const AdminReferralsPage = () => {
                     <tr key={item.id}>
                       <td>{formatDateTime(item.created_at)}</td>
                       <td>{referrerName}</td>
-                      <td>{isInfluencer ? 'Инфлюенсер' : 'Обычный'}</td>
+                      <td>{isInfluencer ? 'Инфлюенсер' : 'Обычный игрок'}</td>
                       <td>{referredName}</td>
                       <td>{item.bonus_amount}</td>
                       <td>{item.money_amount} ₽</td>
