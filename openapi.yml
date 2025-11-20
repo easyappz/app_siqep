@@ -381,6 +381,32 @@ paths:
                 $ref: '#/components/schemas/AdminStatsOverview'
         '401':
           description: Требуется аутентификация
+  /api/test/simulate-deposits/:
+    post:
+      operationId: test_simulate_deposits_create
+      summary: 'Тестовый: смоделировать депозиты для Амир и Альфира'
+      description: 'Тестовый админский эндпоинт, который создаёт (если нужно) пользователей «Амир» и «Альфира» и проводит для каждого депозит на указанную сумму (по умолчанию 2000 ₽), применяя всю стандартную реферальную бизнес-логику: начисление бонуса за первый турнир/депозит и 10% от депозитов для инфлюенсеров.'
+      tags:
+        - test
+      security:
+        - MemberTokenAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestSimulateDepositsRequest'
+      responses:
+        '200':
+          description: 'Результат симуляции депозитов'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestSimulateDepositsResponse'
+        '401':
+          description: Требуется аутентификация
+        '403':
+          description: Доступ запрещён
 components:
   schemas:
     Message:
@@ -1089,6 +1115,80 @@ components:
       required:
         - count
         - results
+    TestReferralChange:
+      type: object
+      description: 'Информация об одной активированной связи ancestor/descendant после симуляции депозита.'
+      properties:
+        ancestor_id:
+          type: integer
+          description: 'ID предка (реферера), для которого был установлен флаг has_paid_first_bonus.'
+        level:
+          type: integer
+          description: 'Уровень глубины этой связи относительно игрока, сделавшего депозит.'
+      required:
+        - ancestor_id
+        - level
+    TestMemberDepositResult:
+      type: object
+      description: 'Результат симуляции депозита для одного пользователя.'
+      properties:
+        member:
+          $ref: '#/components/schemas/Member'
+        amount:
+          type: integer
+          description: 'Сумма депозита в рублях, использованная в симуляции.'
+        v_coins_balance_before:
+          type: string
+          format: decimal
+          description: 'Баланс V-Coins до симуляции депозита.'
+        cash_balance_before:
+          type: string
+          format: decimal
+          description: 'Денежный баланс в рублях до симуляции депозита.'
+        v_coins_balance_after:
+          type: string
+          format: decimal
+          description: 'Баланс V-Coins после симуляции депозита.'
+        cash_balance_after:
+          type: string
+          format: decimal
+          description: 'Денежный баланс в рублях после симуляции депозита.'
+        referral_changes:
+          type: array
+          description: 'Список новых активированных связей ancestor/descendant (если депозит был первым квалифицирующим для пользователя).'
+          items:
+            $ref: '#/components/schemas/TestReferralChange'
+      required:
+        - member
+        - amount
+        - v_coins_balance_before
+        - cash_balance_before
+        - v_coins_balance_after
+        - cash_balance_after
+        - referral_changes
+    TestSimulateDepositsRequest:
+      type: object
+      description: 'Параметры для тестовой симуляции депозитов.'
+      properties:
+        amount:
+          type: integer
+          description: 'Сумма депозита в рублях для каждого пользователя. По умолчанию 2000.'
+      required: []
+    TestSimulateDepositsResponse:
+      type: object
+      description: 'Ответ тестового эндпоинта симуляции депозитов.'
+      properties:
+        status:
+          type: string
+          description: 'Статус выполнения операции (например, "ok").'
+        deposits:
+          type: array
+          description: 'Список результатов по каждому пользователю (Амир и Альфира).'
+          items:
+            $ref: '#/components/schemas/TestMemberDepositResult'
+      required:
+        - status
+        - deposits
   securitySchemes:
     basicAuth:
       type: http

@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Iterable, List, Tuple
 
 from django.db import transaction
+from django.utils import timezone
 
 from .models import (
     Member,
@@ -17,6 +18,7 @@ from .models import (
     INFLUENCER_DEPOSIT_PERCENT,
     USER_TYPE_PLAYER,
     USER_TYPE_INFLUENCER,
+    ReferralEvent,
 )
 
 
@@ -54,7 +56,7 @@ def check_for_rank_up(member: Member) -> None:
 
     Active referrals are defined as level-1 ReferralRelation rows for which
     has_paid_first_bonus == True. This corresponds to referrals that have
-    completed their first paid tournament / first qualifying deposit.
+    completed their first paid tournament / qualifying deposit.
     """
 
     if member.pk is None:
@@ -241,3 +243,58 @@ def on_member_deposit(member: Member, deposit_amount: Decimal) -> None:
 
     referrer.cash_balance = (referrer.cash_balance or Decimal("0.00")) + commission
     referrer.save(update_fields=["cash_balance"])
+
+
+def process_member_deposit(member: Member, deposit_amount: Decimal, created_at=None) -> ReferralEvent | None:
+    """Canonical helper to process a member deposit.
+
+    This function encapsulates the full business flow that should happen when a
+    member makes a deposit:
+    - Creates a `ReferralEvent` for analytics (if a referrer is known).
+    - If this is the first qualifying tournament/deposit for the member, calls
+      `on_user_first_tournament_completed` to distribute deep one-time bonuses.
+    - Calls `on_member_deposit` to apply the lifetime 10% influencer commission
+      for the direct referrer (if applicable).
+
+    Returns the created `ReferralEvent` instance, or ``None`` if no referrer is
+    configured for the member and no event is created.
+    """
+
+    if member.pk is None:
+        return None
+
+    if not isinstance(deposit_amount, Decimal):
+        deposit_amount = Decimal(str(deposit_amount))
+
+    if deposit_amount <= 0:
+        return None
+
+    if created_at is None:
+        created_at = timezone.now()
+
+    referrer: Member | None = member.referrer or member.referred_by
+    if referrer is None:
+        # Without a referrer there is no referral event or commission.
+        return None
+
+    with transaction.atomic():
+        event = ReferralEvent.objects.create(
+            referrer=referrer,
+            referred=member,
+            bonus_amount=0,
+            money_amount=0,
+            deposit_amount=int(deposit_amount),
+            created_at=created_at,
+        )
+
+        has_any_first_bonus = ReferralRelation.objects.filter(
+            descendant=member,
+            has_paid_first_bonus=True,
+        ).exists()
+
+        if not has_any_first_bonus:
+            on_user_first_tournament_completed(member)
+
+        on_member_deposit(member, deposit_amount)
+
+    return event

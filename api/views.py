@@ -15,6 +15,7 @@ from rest_framework.exceptions import PermissionDenied
 from .authentication import MemberTokenAuthentication
 from .models import Member, ReferralEvent, MemberAuthToken, ReferralReward, ReferralRelation
 from .permissions import IsAdminMember
+from .referral_utils import process_member_deposit
 from .serializers import (
     MessageSerializer,
     MemberSerializer,
@@ -29,6 +30,7 @@ from .serializers import (
     ReferralEventAdminSerializer,
     AdminStatsOverviewSerializer,
     AdminCreateReferralEventSerializer,
+    TestSimulateDepositsResponseSerializer,
 )
 
 
@@ -495,4 +497,107 @@ class AdminStatsOverviewView(APIView):
         }
 
         serializer = AdminStatsOverviewSerializer(overview_data)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class TestSimulateDepositsView(APIView):
+    """Test-only endpoint to simulate deposits for Amir and Alfirа.
+
+    Creates the members if they do not exist and processes a deposit for each
+    using the same referral logic as real deposits.
+    """
+
+    authentication_classes = [MemberTokenAuthentication]
+    permission_classes = [IsAuthenticated, IsAdminMember]
+
+    @extend_schema(
+        request=None,
+        responses={200: TestSimulateDepositsResponseSerializer},
+        description=(
+            "Тестовый эндпоинт для администраторов: создаёт (при необходимости) "
+            "пользователей «Амир» и «Альфира» и проводит для каждого депозит "
+            "на указанную сумму (по умолчанию 2000 ₽), применяя все стандартные "
+            "реферальные начисления, включая бонус за первый турнир/депозит и "
+            "10% для инфлюенсера от депозитов."
+        ),
+    )
+    def post(self, request):
+        # Determine deposit amount from request body (optional)
+        default_amount = 2000
+        raw_amount = request.data.get("amount", default_amount)
+        try:
+            amount_int = int(raw_amount)
+        except (TypeError, ValueError):
+            amount_int = default_amount
+        if amount_int <= 0:
+            amount_int = default_amount
+
+        members_definition = [
+            {"first_name": "Амир", "last_name": "Тестов", "phone": "+79990000001"},
+            {"first_name": "Альфира", "last_name": "Тестова", "phone": "+79990000002"},
+        ]
+
+        deposits = []
+
+        for item in members_definition:
+            member = Member.objects.filter(phone=item["phone"]).first()
+            if member is None:
+                member = Member(
+                    first_name=item["first_name"],
+                    last_name=item["last_name"],
+                    phone=item["phone"],
+                    email=None,
+                    is_influencer=False,
+                    is_admin=False,
+                )
+                member.set_password("test1234")
+                member.save()
+
+            before_v_coins = member.v_coins_balance
+            before_cash = member.cash_balance
+
+            before_relations = list(
+                ReferralRelation.objects.filter(
+                    descendant=member,
+                    has_paid_first_bonus=True,
+                ).values("ancestor_id", "level")
+            )
+
+            process_member_deposit(member, Decimal(amount_int))
+            member.refresh_from_db()
+
+            after_relations = list(
+                ReferralRelation.objects.filter(
+                    descendant=member,
+                    has_paid_first_bonus=True,
+                ).values("ancestor_id", "level")
+            )
+
+            before_set = {(r["ancestor_id"], r["level"]) for r in before_relations}
+            after_set = {(r["ancestor_id"], r["level"]) for r in after_relations}
+            new_pairs = after_set - before_set
+
+            referral_changes = [
+                {"ancestor_id": ancestor_id, "level": level}
+                for (ancestor_id, level) in sorted(new_pairs, key=lambda x: (x[1], x[0]))
+            ]
+
+            deposits.append(
+                {
+                    "member": MemberSerializer(member).data,
+                    "amount": amount_int,
+                    "v_coins_balance_before": before_v_coins,
+                    "cash_balance_before": before_cash,
+                    "v_coins_balance_after": member.v_coins_balance,
+                    "cash_balance_after": member.cash_balance,
+                    "referral_changes": referral_changes,
+                }
+            )
+
+        response_data = {
+            "status": "ok",
+            "deposits": deposits,
+        }
+
+        serializer = TestSimulateDepositsResponseSerializer(response_data)
         return Response(serializer.data, status=status.HTTP_200_OK)

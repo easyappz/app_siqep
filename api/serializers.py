@@ -4,8 +4,7 @@ from rest_framework import serializers
 from .models import Member, ReferralEvent, ReferralReward, ReferralRelation, RankRule
 from .referral_utils import (
     on_new_user_registered,
-    on_user_first_tournament_completed,
-    on_member_deposit,
+    process_member_deposit,
 )
 
 
@@ -554,37 +553,11 @@ class AdminCreateReferralEventSerializer(serializers.Serializer):
         return attrs
 
     def create(self, validated_data):
-        from decimal import Decimal as _Decimal
-
         referred: Member = validated_data["referred"]
-        referrer: Member | None = referred.referrer or referred.referred_by
-
         deposit_amount: int = validated_data["deposit_amount"]
         created_at = validated_data.get("created_at") or timezone.now()
 
-        # For analytics and compatibility we still store a ReferralEvent record.
-        event = ReferralEvent.objects.create(
-            referrer=referrer,
-            referred=referred,
-            bonus_amount=0,
-            money_amount=0,
-            deposit_amount=deposit_amount,
-            created_at=created_at,
-        )
-
-        # Determine if this is the first tournament/deposit for this member
-        # in the context of the referral program.
-        has_any_first_bonus = ReferralRelation.objects.filter(
-            descendant=referred,
-            has_paid_first_bonus=True,
-        ).exists()
-
-        if not has_any_first_bonus:
-            on_user_first_tournament_completed(referred)
-
-        # Lifetime 10% commission to direct influencer referrer (if any).
-        on_member_deposit(referred, _Decimal(deposit_amount))
-
+        event = process_member_deposit(referred, deposit_amount, created_at=created_at)
         return event
 
 
@@ -630,3 +603,34 @@ class AdminStatsOverviewSerializer(serializers.Serializer):
     registrations_by_day = AdminRegistrationsByDaySerializer(many=True)
     top_referrers = AdminTopReferrerSerializer(many=True)
     income_by_source = AdminIncomeBySourceSerializer()
+
+
+# ============================
+# Test-only serializers
+# ============================
+
+
+class TestReferralChangeSerializer(serializers.Serializer):
+    """Single activated ancestor/descendant relation after a simulated deposit."""
+
+    ancestor_id = serializers.IntegerField()
+    level = serializers.IntegerField()
+
+
+class TestMemberDepositResultSerializer(serializers.Serializer):
+    """Result of a simulated deposit for a single member."""
+
+    member = MemberSerializer()
+    amount = serializers.IntegerField()
+    v_coins_balance_before = serializers.DecimalField(max_digits=12, decimal_places=2)
+    cash_balance_before = serializers.DecimalField(max_digits=12, decimal_places=2)
+    v_coins_balance_after = serializers.DecimalField(max_digits=12, decimal_places=2)
+    cash_balance_after = serializers.DecimalField(max_digits=12, decimal_places=2)
+    referral_changes = TestReferralChangeSerializer(many=True)
+
+
+class TestSimulateDepositsResponseSerializer(serializers.Serializer):
+    """Response schema for the test simulate-deposits endpoint."""
+
+    status = serializers.CharField()
+    deposits = TestMemberDepositResultSerializer(many=True)

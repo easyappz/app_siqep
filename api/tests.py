@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.test import TestCase
+from rest_framework.test import APIClient
 
 from .models import (
     Member,
@@ -17,6 +18,7 @@ from .models import (
     INFLUENCER_DIRECT_REFERRAL_BONUS_CASH,
     INFLUENCER_DEPTH_BASE_BONUS_CASH,
     INFLUENCER_DEPOSIT_PERCENT,
+    MemberAuthToken,
 )
 from .referral_utils import (
     get_rank_multiplier,
@@ -268,3 +270,74 @@ class RankedReferralLogicTests(TestCase):
 
         # With only 1 active referral, rank must still be standard
         self.assertEqual(member.rank, RANK_STANDARD)
+
+
+class TestSimulateDepositsAPITests(TestCase):
+    """Tests for the test-only simulate-deposits endpoint."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.url = "/api/test/simulate-deposits/"
+
+        self.admin = Member(
+            first_name="Admin",
+            last_name="User",
+            phone="+79990009999",
+            email=None,
+            is_influencer=False,
+            is_admin=True,
+        )
+        self.admin.set_password("adminpass123")
+        self.admin.save()
+
+        token = MemberAuthToken.create_for_member(self.admin)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+    def test_simulate_deposits_creates_members_and_applies_deposit(self):
+        Member.objects.filter(
+            phone__in=["+79990000001", "+79990000002"],
+        ).delete()
+
+        response = self.client.post(self.url, {}, format="json")
+        self.assertEqual(response.status_code, 200)
+
+        data = response.json()
+        self.assertEqual(data.get("status"), "ok")
+        self.assertEqual(len(data.get("deposits", [])), 2)
+
+        phones_seen = set()
+        for item in data["deposits"]:
+            member_data = item["member"]
+            phone = member_data["phone"]
+            phones_seen.add(phone)
+            self.assertIn(phone, ["+79990000001", "+79990000002"])
+            self.assertEqual(item["amount"], 2000)
+
+            # Balances fields must be present
+            self.assertIn("v_coins_balance_after", item)
+            self.assertIn("cash_balance_after", item)
+
+        self.assertEqual(phones_seen, {"+79990000001", "+79990000002"})
+
+    def test_simulate_deposits_requires_admin(self):
+        # Unauthenticated request
+        client = APIClient()
+        response = client.post(self.url, {}, format="json")
+        self.assertEqual(response.status_code, 401)
+
+        # Authenticated non-admin
+        regular = Member(
+            first_name="User",
+            last_name="Regular",
+            phone="+79990008888",
+            email=None,
+            is_influencer=False,
+            is_admin=False,
+        )
+        regular.set_password("userpass123")
+        regular.save()
+        token = MemberAuthToken.create_for_member(regular)
+        client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+        response = client.post(self.url, {}, format="json")
+        self.assertEqual(response.status_code, 403)

@@ -12,6 +12,7 @@ from .views import (
     AdminMemberDetailView,
     AdminReferralEventListView,
     AdminStatsOverviewView,
+    TestSimulateDepositsView,
 )
 
 urlpatterns = [
@@ -50,5 +51,11 @@ urlpatterns = [
         "admin/stats/overview/",
         AdminStatsOverviewView.as_view(),
         name="admin-stats-overview",
+    ),
+    # Test-only endpoint
+    path(
+        "test/simulate-deposits/",
+        TestSimulateDepositsView.as_view(),
+        name="test-simulate-deposits",
     ),
 ]
