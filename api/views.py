@@ -22,6 +22,7 @@ from .serializers import (
     AdminCreateMemberSerializer,
     ReferralEventAdminSerializer,
     AdminStatsOverviewSerializer,
+    AdminCreateReferralEventSerializer,
 )
 
 
@@ -208,12 +209,16 @@ class AdminMemberDetailView(generics.RetrieveUpdateAPIView):
     lookup_field = "pk"
 
 
-class AdminReferralEventListView(generics.ListAPIView):
-    """List referral events for admin panel with optional filtering."""
+class AdminReferralEventListView(generics.ListCreateAPIView):
+    """List referral events for admin panel with optional filtering and allow creation."""
 
     authentication_classes = [MemberTokenAuthentication]
     permission_classes = [IsAuthenticated, IsAdminMember]
-    serializer_class = ReferralEventAdminSerializer
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return AdminCreateReferralEventSerializer
+        return ReferralEventAdminSerializer
 
     def get_queryset(self):
         qs = ReferralEvent.objects.select_related("referrer", "referred").all().order_by(
@@ -255,6 +260,16 @@ class AdminReferralEventListView(generics.ListAPIView):
                 pass
 
         return qs
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        event = serializer.save()
+        output_serializer = ReferralEventAdminSerializer(
+            event,
+            context=self.get_serializer_context(),
+        )
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
 
 
 class AdminStatsOverviewView(APIView):
@@ -307,15 +322,17 @@ class AdminStatsOverviewView(APIView):
                 }
             )
 
-        # Income by source
-        income_per_client = 1000
-        total_events = ReferralEvent.objects.count()
-        influencer_events = ReferralEvent.objects.filter(
-            referrer__is_influencer=True
-        ).count()
+        # Income by source: based on sum of deposit_amount instead of fixed income per client
+        total_income_data = ReferralEvent.objects.aggregate(
+            total=Sum("deposit_amount")
+        )
+        total_income = total_income_data["total"] or 0
 
-        total_income = total_events * income_per_client
-        income_from_influencers = influencer_events * income_per_client
+        influencer_income_data = ReferralEvent.objects.filter(
+            referrer__is_influencer=True
+        ).aggregate(total=Sum("deposit_amount"))
+        income_from_influencers = influencer_income_data["total"] or 0
+
         income_from_regular_users = total_income - income_from_influencers
 
         income_by_source = {

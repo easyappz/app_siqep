@@ -238,8 +238,8 @@ paths:
   /api/admin/referrals/:
     get:
       operationId: admin_referrals_list
-      summary: 'Админ-панель: Все реферальные ссылки'
-      description: 'Список всех реферальных событий с возможностью фильтрации по пользователю, типу (инфлюенсер/обычный) и диапазону дат.'
+      summary: 'Админ-панель: Все реферальные события (депозиты)'
+      description: 'Список всех реферальных событий (депозитов) с возможностью фильтрации по пользователю, типу (инфлюенсер/обычный) и диапазону дат. Каждое событие отражает конкретный депозит/стек/ребай с полем deposit_amount.'
       tags:
         - admin
       security:
@@ -278,6 +278,31 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PaginatedReferralEventAdminList'
+        '401':
+          description: Требуется аутентификация
+    post:
+      operationId: admin_referrals_create
+      summary: 'Админ-панель: Создать реферальное событие (депозит)'
+      description: 'Создаёт реферальное событие, фиксирующее депозит приведённого игрока (первый визит или последующие пополнения) и автоматически рассчитывает вознаграждение рефереру по правилам для обычных игроков и инфлюенсеров.'
+      tags:
+        - admin
+      security:
+        - MemberTokenAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCreateReferralEventRequest'
+      responses:
+        '201':
+          description: Реферальное событие создано
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReferralEventAdmin'
+        '400':
+          description: Ошибка валидации данных
         '401':
           description: Требуется аутентификация
   /api/admin/stats/overview/:
@@ -468,7 +493,7 @@ components:
           description: 'Имя и фамилия приглашённого пользователя.'
         bonus_amount:
           type: integer
-          description: 'Количество бонусных баллов, начисленных за реферала.'
+          description: 'Количество бесплатных стеков (бонусных стеков по 1000 ₽), начисленных за реферала. Хранится как целое число стеков.'
         money_amount:
           type: integer
           description: 'Сумма денег в рублях, начисленная инфлюенсеру.'
@@ -503,7 +528,7 @@ components:
           description: 'Активные рефералы за последние 30 дней.'
         total_bonus_points:
           type: integer
-          description: 'Общее количество заработанных бонусных баллов.'
+          description: 'Общее количество бесплатных стеков, заработанных за рефералов (bonus_amount), где 1 стек соответствует стартовому бай-ину примерно 1000 ₽.'
         total_money_earned:
           type: integer
           description: 'Общая сумма заработанных денег в рублях.'
@@ -573,7 +598,7 @@ components:
           readOnly: true
         total_bonus_points:
           type: integer
-          description: 'Общее количество заработанных бонусных баллов (агрегировано по ReferralEvent).'
+          description: 'Общее количество бесплатных стеков (bonus_amount), начисленных за рефералов (агрегировано по ReferralEvent).'
           readOnly: true
         total_money_earned:
           type: integer
@@ -624,6 +649,24 @@ components:
         - last_name
         - phone
         - password
+    AdminCreateReferralEventRequest:
+      type: object
+      description: 'Данные для создания реферального события (депозита) через админ-панель.'
+      properties:
+        referred_id:
+          type: integer
+          description: 'ID приглашённого игрока.'
+        deposit_amount:
+          type: integer
+          description: 'Сумма депозита (стоимость стека/пополнения) в рублях.'
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 'Дата и время события. Если не указано, используется текущее время.'
+      required:
+        - referred_id
+        - deposit_amount
     ReferralEventAdmin:
       type: object
       description: 'Реферальное событие для отображения в админ-панели.'
@@ -664,13 +707,13 @@ components:
             - last_name
         bonus_amount:
           type: integer
-          description: 'Количество бонусных баллов, начисленных за реферала.'
+          description: 'Количество бесплатных стеков (bonus_amount), начисленных за реферала по данному событию.'
         money_amount:
           type: integer
-          description: 'Сумма денег в рублях, начисленная инфлюенсеру.'
+          description: 'Сумма денег в рублях, начисленная инфлюенсеру за это реферальное событие.'
         deposit_amount:
           type: integer
-          description: 'Сумма депозита в рублях, связанная с реферальным событием.'
+          description: 'Сумма депозита в рублях за конкретное посещение / покупку фишек (один стартовый стек или ребай). Обычно стоимость одного стека составляет около 1000 ₽, но поле хранит произвольную сумму депозита.'
         created_at:
           type: string
           format: date-time
@@ -722,7 +765,7 @@ components:
           description: 'Общее количество привлечённых рефералов.'
         total_bonus_points:
           type: integer
-          description: 'Суммарные бонусные баллы, начисленные за рефералов.'
+          description: 'Суммарные бесплатные стеки (bonus_amount), начисленные за рефералов.'
         total_money_earned:
           type: integer
           description: 'Суммарный заработок в рублях, полученный за рефералов.'
@@ -740,13 +783,13 @@ components:
       properties:
         total_income:
           type: integer
-          description: 'Общий доход (количество реферальных событий × 1000 руб.).'
+          description: 'Общий доход, рассчитанный на основе суммарных депозитов (deposit_amount) по реферальным событиям. Типичная стоимость одного стека — около 1000 ₽, но поле хранит произвольные суммы депозитов.'
         income_from_influencers:
           type: integer
-          description: 'Доход от клиентов, привлечённых инфлюенсерами (количество таких событий × 1000 руб.).'
+          description: 'Доход от клиентов, привлечённых инфлюенсерами, рассчитанный по сумме их депозитов (deposit_amount). Типичная стоимость одного стека — около 1000 ₽, но поле хранит произвольные суммы депозитов.'
         income_from_regular_users:
           type: integer
-          description: 'Доход от клиентов, привлечённых обычными пользователями.'
+          description: 'Доход от клиентов, привлечённых обычными пользователями, рассчитанный по суммарным депозитам (deposit_amount) за их посещения.'
       required:
         - total_income
         - income_from_influencers

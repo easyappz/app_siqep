@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework import serializers
 
 from .models import Member, ReferralEvent
@@ -107,17 +108,25 @@ class RegistrationSerializer(serializers.Serializer):
         return attrs
 
     def create(self, validated_data: dict) -> Member:
-        """Create a new Member and handle referral business logic.
+        """Создать нового участника (Member) и применить реферальную бизнес-логику.
 
-        Business rules:
-        - 1 клиент = 1 депозит = 1000 рублей.
-        - Если referrer.is_influencer == False:
-          * bonus_amount = 1, money_amount = 0.
-          * referrer.total_bonus_points увеличивается на 1.
-        - Если referrer.is_influencer == True:
-          * bonus_amount = 0, money_amount = 200 (20% от 1000).
-          * referrer.total_money_earned увеличивается на 200.
-        - В любом случае создается ReferralEvent c этими значениями.
+        Правила на момент регистрации (первое посещение / первый стек):
+        - Всегда создаётся ReferralEvent с deposit_amount = 1000 (первый стартовый стек).
+        - Если referrer.is_influencer == False (обычный игрок клуба):
+          * он получает немонетарное вознаграждение — один бесплатный стек (1000 ₽);
+          * это отражается как bonus_amount = 1, а суммарный счётчик Member.total_bonus_points
+            увеличивается на 1;
+          * money_amount = 0.
+        - Если referrer.is_influencer == True (инфлюенсер):
+          * он получает денежное вознаграждение в размере 1000 ₽ за первое участие
+            приглашённого игрока (первый стек);
+          * это отражается как money_amount = 1000, а Member.total_money_earned
+            увеличивается на 1000;
+          * bonus_amount = 0.
+
+        В будущем для инфлюенсеров будет добавлена отдельная логика начисления 10% от
+        последующих депозитов (через отдельный эндпоинт/события). В данном методе
+        обрабатывается только первый стек при регистрации.
         """
 
         referrer = validated_data.pop("referrer", None)
@@ -152,7 +161,7 @@ class RegistrationSerializer(serializers.Serializer):
             deposit_amount = 1000
             if referrer.is_influencer:
                 bonus_amount = 0
-                money_amount = 200
+                money_amount = 1000
                 referrer.total_money_earned += money_amount
             else:
                 bonus_amount = 1
@@ -369,6 +378,104 @@ class ReferralEventAdminSerializer(serializers.ModelSerializer):
 
     def get_referrer_is_influencer(self, obj: ReferralEvent) -> bool:
         return bool(obj.referrer.is_influencer)
+
+
+class AdminCreateReferralEventSerializer(serializers.Serializer):
+    """Serializer for creating referral/deposit events from the admin panel.
+
+    This serializer records a concrete deposit (stack/rebuy) for a referred member
+    and applies business rules for influencers vs regular players.
+    """
+
+    referred_id = serializers.IntegerField(help_text="ID приглашённого игрока (Member.id).")
+    deposit_amount = serializers.IntegerField(
+        min_value=1,
+        help_text=(
+            "Сумма депозита в рублях за конкретный стек/ребай. Типичный размер стека — 1000 ₽, "
+            "но можно указать любую положительную сумму."
+        ),
+        error_messages={
+            "min_value": (
+                "Сумма депозита должна быть не менее 1 рубля. Типичный размер стека — 1000 ₽."
+            ),
+        },
+    )
+    created_at = serializers.DateTimeField(
+        required=False,
+        allow_null=True,
+        help_text=(
+            "Необязательная дата и время события. Если не указано, будет использовано текущее время."
+        ),
+    )
+
+    def validate(self, attrs):
+        referred_id = attrs.get("referred_id")
+        try:
+            referred = Member.objects.get(pk=referred_id)
+        except Member.DoesNotExist:
+            raise serializers.ValidationError(
+                {"referred_id": "Пользователь с указанным ID не найден."}
+            )
+
+        if referred.referred_by is None:
+            raise serializers.ValidationError(
+                {
+                    "referred_id": (
+                        "Для этого пользователя не записан реферер, невозможно создать реферальное событие."
+                    )
+                }
+            )
+
+        attrs["referred"] = referred
+        return attrs
+
+    def create(self, validated_data):
+        referred: Member = validated_data["referred"]
+        referrer: Member = referred.referred_by
+
+        has_existing_events = ReferralEvent.objects.filter(
+            referrer=referrer,
+            referred=referred,
+        ).exists()
+
+        deposit_amount: int = validated_data["deposit_amount"]
+        created_at = validated_data.get("created_at") or timezone.now()
+
+        # Default values; adjusted below depending on business rules.
+        bonus_amount = 0
+        money_amount = 0
+
+        if referrer.is_influencer:
+            # Инфлюенсер: за первый стек получает 100% депозита, за последующие — 10%.
+            if not has_existing_events:
+                money_amount = deposit_amount
+            else:
+                # Для последующих депозитов берём 10% от суммы депозита.
+                # Используется целочисленное усечение (int), чтобы всегда хранить целые рубли.
+                money_amount = int(deposit_amount * 0.10)
+
+            # Бонусные стеки для инфлюенсеров не начисляются.
+            bonus_amount = 0
+
+            referrer.total_money_earned += money_amount
+            referrer.save(update_fields=["total_money_earned"])
+        else:
+            # Обычный игрок клуба: бесплатный стек за приглашение нового игрока уже
+            # был выдан при регистрации (bonus_amount = 1). Дополнительные депозитные
+            # события, которые создаёт администратор, используются только для аналитики
+            # (учёт deposit_amount) и не приносят дополнительных бонусов или денег.
+            bonus_amount = 0
+            money_amount = 0
+
+        event = ReferralEvent.objects.create(
+            referrer=referrer,
+            referred=referred,
+            bonus_amount=bonus_amount,
+            money_amount=money_amount,
+            deposit_amount=deposit_amount,
+            created_at=created_at,
+        )
+        return event
 
 
 class AdminRegistrationsByDaySerializer(serializers.Serializer):
