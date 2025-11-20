@@ -19,7 +19,10 @@ from .models import (
     USER_TYPE_PLAYER,
     USER_TYPE_INFLUENCER,
     ReferralEvent,
+    ReferralReward,
 )
+
+RewardType = ReferralReward.RewardType
 
 
 def get_rank_multiplier(rank: str, user_type: str) -> Decimal:
@@ -147,6 +150,8 @@ def on_user_first_tournament_completed(member: Member) -> None:
       (V-Coins for players, ₽ for influencers), taking rank multipliers into
       account for deep levels.
     - Updates the ancestor's v_coins_balance or cash_balance.
+    - Creates a ReferralReward entry describing the payout.
+    - Updates aggregated counters on Member (total_bonus_points / total_money_earned).
     - Marks has_paid_first_bonus=True for that ancestor/descendant pair.
 
     After processing, rank recalculation is triggered for all direct referrers
@@ -175,33 +180,119 @@ def on_user_first_tournament_completed(member: Member) -> None:
                 continue
 
             is_influencer = ancestor.user_type == USER_TYPE_INFLUENCER
+            level = relation.level
 
-            if relation.level == 1:
+            bonus_amount: Decimal
+            update_fields: list[str] = []
+            stack_count_for_member = 0
+            money_increment_int = 0
+
+            if level == 1:
                 # Direct referrer bonus
                 if is_influencer:
                     bonus_amount = INFLUENCER_DIRECT_REFERRAL_BONUS_CASH
-                    ancestor.cash_balance = (ancestor.cash_balance or Decimal("0.00")) + bonus_amount
-                    ancestor.save(update_fields=["cash_balance"])
+                    ancestor.cash_balance = (
+                        ancestor.cash_balance or Decimal("0.00")
+                    ) + bonus_amount
+                    update_fields.append("cash_balance")
+
+                    ReferralReward.objects.create(
+                        member=ancestor,
+                        source_member=member,
+                        reward_type=RewardType.INFLUENCER_FIRST_TOURNAMENT,
+                        amount_rub=bonus_amount,
+                        stack_count=0,
+                        depth=level,
+                    )
+
+                    money_increment_int = int(bonus_amount)
                 else:
                     bonus_amount = PLAYER_DIRECT_REFERRAL_BONUS_VCOINS
-                    ancestor.v_coins_balance = (ancestor.v_coins_balance or Decimal("0.00")) + bonus_amount
-                    ancestor.save(update_fields=["v_coins_balance"])
+                    ancestor.v_coins_balance = (
+                        ancestor.v_coins_balance or Decimal("0.00")
+                    ) + bonus_amount
+                    update_fields.append("v_coins_balance")
+
+                    stack_count_for_member = 1
+                    ReferralReward.objects.create(
+                        member=ancestor,
+                        source_member=member,
+                        reward_type=RewardType.PLAYER_STACK,
+                        amount_rub=Decimal("0.00"),
+                        stack_count=stack_count_for_member,
+                        depth=level,
+                    )
 
                 direct_ancestor_ids.add(ancestor.pk)
             else:
                 # Deep cashback (levels 2..MAX_REFERRAL_DEPTH)
                 if is_influencer:
                     base_bonus = INFLUENCER_DEPTH_BASE_BONUS_CASH
-                    multiplier = get_rank_multiplier(ancestor.rank, USER_TYPE_INFLUENCER)
-                    bonus_amount = (base_bonus * multiplier).quantize(Decimal("0.01"))
-                    ancestor.cash_balance = (ancestor.cash_balance or Decimal("0.00")) + bonus_amount
-                    ancestor.save(update_fields=["cash_balance"])
+                    multiplier = get_rank_multiplier(
+                        ancestor.rank,
+                        USER_TYPE_INFLUENCER,
+                    )
+                    bonus_amount = (base_bonus * multiplier).quantize(
+                        Decimal("0.01")
+                    )
+                    ancestor.cash_balance = (
+                        ancestor.cash_balance or Decimal("0.00")
+                    ) + bonus_amount
+                    update_fields.append("cash_balance")
+
+                    ReferralReward.objects.create(
+                        member=ancestor,
+                        source_member=member,
+                        reward_type=RewardType.INFLUENCER_FIRST_TOURNAMENT,
+                        amount_rub=bonus_amount,
+                        stack_count=0,
+                        depth=level,
+                    )
+
+                    money_increment_int = int(bonus_amount)
                 else:
                     base_bonus = PLAYER_DEPTH_BASE_BONUS_VCOINS
-                    multiplier = get_rank_multiplier(ancestor.rank, USER_TYPE_PLAYER)
-                    bonus_amount = (base_bonus * multiplier).quantize(Decimal("0.01"))
-                    ancestor.v_coins_balance = (ancestor.v_coins_balance or Decimal("0.00")) + bonus_amount
-                    ancestor.save(update_fields=["v_coins_balance"])
+                    multiplier = get_rank_multiplier(
+                        ancestor.rank,
+                        USER_TYPE_PLAYER,
+                    )
+                    bonus_amount = (base_bonus * multiplier).quantize(
+                        Decimal("0.01")
+                    )
+                    ancestor.v_coins_balance = (
+                        ancestor.v_coins_balance or Decimal("0.00")
+                    ) + bonus_amount
+                    update_fields.append("v_coins_balance")
+
+                    # Convert V-Coins into integer stack count using direct bonus size
+                    stack_count_for_member = int(
+                        bonus_amount // PLAYER_DIRECT_REFERRAL_BONUS_VCOINS
+                    )
+
+                    ReferralReward.objects.create(
+                        member=ancestor,
+                        source_member=member,
+                        reward_type=RewardType.PLAYER_STACK,
+                        amount_rub=Decimal("0.00"),
+                        stack_count=stack_count_for_member,
+                        depth=level,
+                    )
+
+            if is_influencer and money_increment_int > 0:
+                ancestor.total_money_earned = (
+                    ancestor.total_money_earned or 0
+                ) + money_increment_int
+                update_fields.append("total_money_earned")
+            elif not is_influencer and stack_count_for_member > 0:
+                ancestor.total_bonus_points = (
+                    ancestor.total_bonus_points or 0
+                ) + stack_count_for_member
+                update_fields.append("total_bonus_points")
+
+            if update_fields:
+                # Preserve field order but ensure uniqueness
+                unique_update_fields = list(dict.fromkeys(update_fields))
+                ancestor.save(update_fields=unique_update_fields)
 
             # Mark this ancestor/descendant pair as processed for first bonus
             relation.has_paid_first_bonus = True
@@ -237,12 +328,33 @@ def on_member_deposit(member: Member, deposit_amount: Decimal) -> None:
     if referrer.user_type != USER_TYPE_INFLUENCER:
         return
 
-    commission = (deposit_amount * INFLUENCER_DEPOSIT_PERCENT).quantize(Decimal("0.01"))
+    commission = (deposit_amount * INFLUENCER_DEPOSIT_PERCENT).quantize(
+        Decimal("0.01")
+    )
     if commission <= 0:
         return
 
     referrer.cash_balance = (referrer.cash_balance or Decimal("0.00")) + commission
-    referrer.save(update_fields=["cash_balance"])
+
+    update_fields: list[str] = ["cash_balance"]
+
+    ReferralReward.objects.create(
+        member=referrer,
+        source_member=member,
+        reward_type=RewardType.INFLUENCER_DEPOSIT_PERCENT,
+        amount_rub=commission,
+        stack_count=0,
+        depth=1,
+    )
+
+    money_increment_int = int(commission)
+    if money_increment_int > 0:
+        referrer.total_money_earned = (
+            referrer.total_money_earned or 0
+        ) + money_increment_int
+        update_fields.append("total_money_earned")
+
+    referrer.save(update_fields=update_fields)
 
 
 def process_member_deposit(member: Member, deposit_amount: Decimal, created_at=None) -> ReferralEvent | None:
@@ -431,7 +543,9 @@ def simulate_demo_deposits_for_amir_alfira(amount: int | Decimal = 2000) -> dict
 
     timur.refresh_from_db()
     timur_cash_after = timur.cash_balance or Decimal("0.00")
-    earnings_delta = (timur_cash_after - timur_cash_before).quantize(Decimal("0.01"))
+    earnings_delta = (timur_cash_after - timur_cash_before).quantize(
+        Decimal("0.01")
+    )
 
     return {
         "players": players_summary,

@@ -128,12 +128,14 @@ class ProfileStatsView(APIView):
         responses={200: ProfileStatsSerializer},
         description=(
             "Получить статистику реферальной программы для текущего пользователя, "
-            "включая количество рефералов, бонусы, историю начислений и график регистраций."
+            "включая количество рефералов, бонусы, историю начислений, график регистраций "
+            "и информацию о собственных депозитах."
         ),
     )
     def get(self, request):
         member: Member = request.user
 
+        # Referral events where the current member is the referrer
         events_qs = ReferralEvent.objects.filter(referrer=member).select_related(
             "referred"
         )
@@ -144,9 +146,34 @@ class ProfileStatsView(APIView):
         thirty_days_ago = timezone.now() - timedelta(days=30)
         active_referrals = events_qs.filter(created_at__gte=thirty_days_ago).count()
 
-        total_bonus_points = member.total_bonus_points
-        total_money_earned = member.total_money_earned
+        # Aggregate rewards from ReferralReward for this member
+        rewards = list(ReferralReward.objects.filter(member=member))
 
+        total_bonus_points = sum(
+            (
+                reward.stack_count
+                for reward in rewards
+                if reward.reward_type == ReferralReward.RewardType.PLAYER_STACK
+            ),
+            0,
+        )
+
+        total_influencer_amount = sum(
+            (
+                reward.amount_rub
+                for reward in rewards
+                if reward.reward_type
+                in (
+                    ReferralReward.RewardType.INFLUENCER_FIRST_TOURNAMENT,
+                    ReferralReward.RewardType.INFLUENCER_DEPOSIT_PERCENT,
+                )
+            ),
+            Decimal("0.00"),
+        )
+
+        total_money_earned = int(total_influencer_amount)
+
+        # Build referral history based on ReferralEvent for backward compatibility
         history_list = []
         for event in events_qs.order_by("-created_at"):
             referred = event.referred
@@ -160,6 +187,7 @@ class ProfileStatsView(APIView):
                 }
             )
 
+        # Registrations chart (referrals per day)
         date_counts = (
             events_qs.annotate(date=TruncDate("created_at"))
             .values("date")
@@ -172,6 +200,19 @@ class ProfileStatsView(APIView):
             for item in date_counts
         ]
 
+        # Own deposits of the current member
+        my_deposits_qs = ReferralEvent.objects.filter(referred=member).order_by(
+            "created_at"
+        )
+        my_deposits_count = my_deposits_qs.count()
+        my_deposits_total_amount = (
+            my_deposits_qs.aggregate(total=Sum("deposit_amount"))["total"] or 0
+        )
+        my_deposits = [
+            {"date": ev.created_at.date(), "amount": ev.deposit_amount}
+            for ev in my_deposits_qs
+        ]
+
         stats_data = {
             "total_referrals": total_referrals,
             "active_referrals": active_referrals,
@@ -179,6 +220,9 @@ class ProfileStatsView(APIView):
             "total_money_earned": total_money_earned,
             "history": history_list,
             "registrations_chart": registrations_chart,
+            "my_deposits_total_amount": my_deposits_total_amount,
+            "my_deposits_count": my_deposits_count,
+            "my_deposits": my_deposits,
         }
 
         serializer = ProfileStatsSerializer(stats_data)

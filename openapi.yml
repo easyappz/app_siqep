@@ -83,7 +83,7 @@ paths:
   /api/profile/stats/:
     get:
       operationId: profile_stats_retrieve
-      description: 'Получить статистику реферальной программы: количество рефералов, заработанные бонусы и деньги, история начислений и график регистраций.'
+      description: 'Получить статистику реферальной программы: количество рефералов, заработанные бонусы и деньги, история начислений, график регистраций и данные о собственных депозитах.'
       tags:
         - profile
       security:
@@ -686,6 +686,20 @@ components:
       required:
         - date
         - count
+    PlayerDepositHistoryItem:
+      type: object
+      description: 'Элемент истории собственных депозитов игрока.'
+      properties:
+        date:
+          type: string
+          format: date
+          description: 'Дата депозита (YYYY-MM-DD).'
+        amount:
+          type: integer
+          description: 'Сумма депозита в рублях.'
+      required:
+        - date
+        - amount
     ProfileStats:
       type: object
       description: 'Статистика реферальной программы для профиля пользователя.'
@@ -698,13 +712,13 @@ components:
           description: 'Активные рефералы за последние 30 дней.'
         total_bonus_points:
           type: integer
-          description: 'Общее количество бесплатных стеков, заработанных за рефералов (bonus_amount), где 1 стек соответствует стартовому бай-ину примерно 1000 ₽.'
+          description: 'Общее количество бесплатных стеков (бонусных стеков), заработанных за рефералов, агрегированное на основе записей ReferralReward (PLAYER_STACK).'
         total_money_earned:
           type: integer
-          description: 'Общая сумма заработанных денег в рублях.'
+          description: 'Общая сумма денежных вознаграждений в рублях, агрегированная по всем записям ReferralReward для инфлюенсера (INFLUENCER_FIRST_TOURNAMENT и INFLUENCER_DEPOSIT_PERCENT).'
         history:
           type: array
-          description: 'История начислений по реферальной программе.'
+          description: 'История начислений по реферальной программе (по данным ReferralEvent, для обратной совместимости).'
           items:
             $ref: '#/components/schemas/ReferralHistoryItem'
         registrations_chart:
@@ -712,6 +726,17 @@ components:
           description: 'График регистраций по дням (количество рефералов в разрезе дат).'
           items:
             $ref: '#/components/schemas/RegistrationsChartPoint'
+        my_deposits_total_amount:
+          type: integer
+          description: 'Суммарная сумма депозитов (покупок фишек) текущего пользователя в рублях.'
+        my_deposits_count:
+          type: integer
+          description: 'Количество депозитов (покупок фишек), совершённых текущим пользователем.'
+        my_deposits:
+          type: array
+          description: 'История депозитов текущего пользователя.'
+          items:
+            $ref: '#/components/schemas/PlayerDepositHistoryItem'
       required:
         - total_referrals
         - active_referrals
@@ -719,6 +744,9 @@ components:
         - total_money_earned
         - history
         - registrations_chart
+        - my_deposits_total_amount
+        - my_deposits_count
+        - my_deposits
     ReferralNode:
       type: object
       description: 'Элемент дерева рефералов, основанный на связях ReferralRelation.'

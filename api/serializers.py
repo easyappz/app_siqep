@@ -287,6 +287,13 @@ class RegistrationsChartPointSerializer(serializers.Serializer):
     count = serializers.IntegerField()
 
 
+class PlayerDepositHistoryItemSerializer(serializers.Serializer):
+    """Single item for a player's own deposit history."""
+
+    date = serializers.DateField()
+    amount = serializers.IntegerField()
+
+
 class ProfileStatsSerializer(serializers.Serializer):
     """Aggregated profile statistics for a member.
 
@@ -299,6 +306,9 @@ class ProfileStatsSerializer(serializers.Serializer):
     total_money_earned = serializers.IntegerField()
     history = ReferralHistoryItemSerializer(many=True)
     registrations_chart = RegistrationsChartPointSerializer(many=True)
+    my_deposits_total_amount = serializers.IntegerField()
+    my_deposits_count = serializers.IntegerField()
+    my_deposits = PlayerDepositHistoryItemSerializer(many=True)
 
 
 class ReferralNodeSerializer(serializers.Serializer):
