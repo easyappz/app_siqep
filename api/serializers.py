@@ -107,17 +107,25 @@ class RegistrationSerializer(serializers.Serializer):
         return attrs
 
     def create(self, validated_data: dict) -> Member:
-        """Create a new Member and handle referral business logic.
+        """Создать нового участника (Member) и применить реферальную бизнес-логику.
 
-        Business rules:
-        - 1 клиент = 1 депозит = 1000 рублей.
-        - Если referrer.is_influencer == False:
-          * bonus_amount = 1, money_amount = 0.
-          * referrer.total_bonus_points увеличивается на 1.
-        - Если referrer.is_influencer == True:
-          * bonus_amount = 0, money_amount = 200 (20% от 1000).
-          * referrer.total_money_earned увеличивается на 200.
-        - В любом случае создается ReferralEvent c этими значениями.
+        Правила на момент регистрации (первое посещение / первый стек):
+        - Всегда создаётся ReferralEvent с deposit_amount = 1000 (первый стартовый стек).
+        - Если referrer.is_influencer == False (обычный игрок клуба):
+          * он получает немонетарное вознаграждение — один бесплатный стек (1000 ₽);
+          * это отражается как bonus_amount = 1, а суммарный счётчик Member.total_bonus_points
+            увеличивается на 1;
+          * money_amount = 0.
+        - Если referrer.is_influencer == True (инфлюенсер):
+          * он получает денежное вознаграждение в размере 1000 ₽ за первое участие
+            приглашённого игрока (первый стек);
+          * это отражается как money_amount = 1000, а Member.total_money_earned
+            увеличивается на 1000;
+          * bonus_amount = 0.
+
+        В будущем для инфлюенсеров будет добавлена отдельная логика начисления 10% от
+        последующих депозитов (через отдельный эндпоинт/события). В данном методе
+        обрабатывается только первый стек при регистрации.
         """
 
         referrer = validated_data.pop("referrer", None)
@@ -152,7 +160,7 @@ class RegistrationSerializer(serializers.Serializer):
             deposit_amount = 1000
             if referrer.is_influencer:
                 bonus_amount = 0
-                money_amount = 200
+                money_amount = 1000
                 referrer.total_money_earned += money_amount
             else:
                 bonus_amount = 1

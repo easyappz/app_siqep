@@ -28,7 +28,13 @@ class Member(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     password_hash = models.CharField(max_length=128)
-    total_bonus_points = models.IntegerField(default=0)
+    total_bonus_points = models.IntegerField(
+        default=0,
+        help_text=(
+            "Total number of free stacks (each roughly equal to a 1000 RUB buy-in) "
+            "earned by regular club players for referrals."
+        ),
+    )
     total_money_earned = models.IntegerField(
         default=0,
         help_text="Total money earned in rubles.",
@@ -88,7 +94,6 @@ class ReferralEvent(models.Model):
         Member,
         on_delete=models.CASCADE,
         related_name="referred_event",
-        unique=True,
     )
     created_at = models.DateTimeField(auto_now_add=True)
     bonus_amount = models.IntegerField(default=0)
@@ -98,7 +103,11 @@ class ReferralEvent(models.Model):
     )
     deposit_amount = models.IntegerField(
         default=1000,
-        help_text="Deposit amount in rubles associated with the referral.",
+        help_text=(
+            "Deposit amount in rubles for a specific visit / chip purchase "
+            "(single stack or rebuy). Typically 1000 RUB per stack, but stored "
+            "as a generic deposit amount."
+        ),
     )
 
     class Meta:
