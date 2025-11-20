@@ -357,7 +357,11 @@ def on_member_deposit(member: Member, deposit_amount: Decimal) -> None:
     referrer.save(update_fields=update_fields)
 
 
-def process_member_deposit(member: Member, deposit_amount: Decimal, created_at=None) -> ReferralEvent | None:
+def process_member_deposit(
+    member: Member,
+    deposit_amount: Decimal,
+    created_at=None,
+) -> ReferralEvent | None:
     """Canonical helper to process a member deposit.
 
     This function encapsulates the full business flow that should happen when a
@@ -410,6 +414,31 @@ def process_member_deposit(member: Member, deposit_amount: Decimal, created_at=N
         on_member_deposit(member, deposit_amount)
 
     return event
+
+
+def apply_influencer_commission_for_deposit(deposit: "Deposit") -> None:
+    """Apply only the influencer 10% commission for a given Deposit instance.
+
+    This is a thin wrapper around :func:`on_member_deposit` that operates
+    directly on a Deposit model.
+    """
+
+    on_member_deposit(deposit.member, deposit.amount)
+
+
+def process_deposit_for_referrals(deposit: "Deposit") -> ReferralEvent | None:
+    """Process a Deposit instance through the full referral pipeline.
+
+    - Creates a `ReferralEvent` for analytics.
+    - Triggers first-tournament bonuses if needed.
+    - Applies influencer 10% commission.
+    """
+
+    return process_member_deposit(
+        deposit.member,
+        deposit.amount,
+        created_at=deposit.created_at,
+    )
 
 
 def simulate_demo_deposits_for_amir_alfira(amount: int | Decimal = 2000) -> dict:

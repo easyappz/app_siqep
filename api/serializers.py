@@ -1,7 +1,7 @@
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Member, ReferralEvent, ReferralReward, ReferralRelation, RankRule
+from .models import Member, ReferralEvent, ReferralReward, ReferralRelation, RankRule, Deposit
 from .referral_utils import (
     on_new_user_registered,
     process_member_deposit,
@@ -27,6 +27,21 @@ class MemberReferrerSerializer(serializers.ModelSerializer):
         ]
 
 
+class DepositSerializer(serializers.ModelSerializer):
+    """Serializer for individual deposits of a member."""
+
+    class Meta:
+        model = Deposit
+        fields = [
+            "id",
+            "amount",
+            "currency",
+            "is_test",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
 class MemberSerializer(serializers.ModelSerializer):
     """Serializer for public member profile data with ranked referral fields."""
 
@@ -34,6 +49,9 @@ class MemberSerializer(serializers.ModelSerializer):
     direct_referrals_count = serializers.SerializerMethodField()
     active_direct_referrals_count = serializers.SerializerMethodField()
     current_rank_rule = serializers.SerializerMethodField()
+    total_deposits = serializers.SerializerMethodField()
+    total_influencer_earnings = serializers.SerializerMethodField()
+    deposits = DepositSerializer(many=True, read_only=True)
 
     class Meta:
         model = Member
@@ -58,6 +76,10 @@ class MemberSerializer(serializers.ModelSerializer):
             "current_rank_rule",
             "withdrawal_bank_details",
             "withdrawal_crypto_wallet",
+            # Deposit and earnings aggregates
+            "total_deposits",
+            "total_influencer_earnings",
+            "deposits",
         ]
         read_only_fields = [
             "id",
@@ -75,6 +97,9 @@ class MemberSerializer(serializers.ModelSerializer):
             "current_rank_rule",
             "withdrawal_bank_details",
             "withdrawal_crypto_wallet",
+            "total_deposits",
+            "total_influencer_earnings",
+            "deposits",
         ]
 
     def get_direct_referrals_count(self, obj: Member) -> int:
@@ -112,6 +137,20 @@ class MemberSerializer(serializers.ModelSerializer):
             "player_depth_bonus_multiplier": rule.player_depth_bonus_multiplier,
             "influencer_depth_bonus_multiplier": rule.influencer_depth_bonus_multiplier,
         }
+
+    def get_total_deposits(self, obj: Member):
+        """Return the total deposits amount for the member as a float."""
+        total = getattr(obj, "total_deposits", None)
+        if total is None:
+            return 0.0
+        return float(total)
+
+    def get_total_influencer_earnings(self, obj: Member):
+        """Return the total influencer earnings for the member as a float."""
+        total = getattr(obj, "total_influencer_earnings", None)
+        if total is None:
+            return 0.0
+        return float(total)
 
 
 class RegistrationSerializer(serializers.Serializer):
