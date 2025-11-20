@@ -492,6 +492,11 @@
   color: #9ca3af;
 }
 
+.profile-inline-note {
+  font-size: 0.8rem;
+  color: #d1d5db;
+}
+
 .profile-value {
   font-size: 0.95rem;
   font-weight: 500;
@@ -636,6 +641,40 @@
 .profile-stat-caption {
   font-size: 0.85rem;
   color: #d1d5db;
+}
+
+.profile-balance-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.profile-balance-card {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 0.95rem 1rem 1rem;
+  border-radius: 0.9rem;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.6);
+}
+
+.profile-balance-value {
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin-top: 0.15rem;
+  margin-bottom: 0.25rem;
+}
+
+.profile-rank-info-card {
+  margin-bottom: 1.5rem;
+}
+
+.profile-rank-rules-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.9rem;
+  color: #e5e7eb;
 }
 
 .profile-chart-card {
@@ -960,9 +999,9 @@
 }
 
 .admin-chart-subtitle {
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   color: #d1d5db;
-  margin-bottom: 0.75rem;
+  margin-top: 0.35rem;
 }
 
 .admin-chart-wrapper {

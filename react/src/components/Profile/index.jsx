@@ -11,13 +11,89 @@ import {
   Legend,
 } from 'recharts';
 import { AuthContext, useAuth } from '../../context/AuthContext';
-import { fetchProfileStats } from '../../api/profile';
+import { getProfile, fetchProfileStats } from '../../api/profile';
 import { fetchReferralTree, fetchReferralRewards } from '../../api/referrals';
+
+function getUserTypeFromMember(member) {
+  if (!member) {
+    return 'player';
+  }
+
+  if (member.user_type) {
+    return member.user_type;
+  }
+
+  if (member.is_influencer) {
+    return 'influencer';
+  }
+
+  return 'player';
+}
+
+function getUserTypeLabel(userType) {
+  if (userType === 'influencer') {
+    return 'Инфлюенсер';
+  }
+  return 'Игрок';
+}
+
+function getRankLabel(rank) {
+  if (rank === 'silver') {
+    return 'Серебряный';
+  }
+  if (rank === 'gold') {
+    return 'Золотой';
+  }
+  if (rank === 'platinum') {
+    return 'Платиновый';
+  }
+  return 'Стандарт';
+}
+
+function getPlayerRewardDescription(rankLabel, currentRankRule) {
+  const multiplier = currentRankRule
+    ? Number(currentRankRule.player_depth_bonus_multiplier || 1)
+    : 1;
+
+  const baseDirect = 1000;
+  const baseDepth = 100;
+  const depthBonus = baseDepth * multiplier;
+
+  const depthBonusText = `${depthBonus} V-Coins`;
+
+  return [
+    `Ваш текущий ранг: ${rankLabel}.`,
+    'За каждого прямого реферала, который впервые приходит в клуб и играет первый платный турнир, вы получаете 1000 V-Coins (эквивалент стартового стека).',
+    `За рефералов на уровнях 2–10 вы получаете глубинный кэшбэк: ${depthBonusText} за первый турнир каждого игрока в цепочке (множитель относительно базовых 100 V-Coins зависит от ранга).`,
+  ];
+}
+
+function getInfluencerRewardDescription(rankLabel, currentRankRule) {
+  const multiplier = currentRankRule
+    ? Number(currentRankRule.influencer_depth_bonus_multiplier || 1)
+    : 1;
+
+  const baseDirect = 500;
+  const baseDepth = 50;
+  const depthBonus = baseDepth * multiplier;
+
+  const depthBonusText = `${depthBonus} ₽`;
+
+  return [
+    `Ваш текущий ранг: ${rankLabel}.`,
+    `За прямого реферала (уровень 1) вы получаете ${baseDirect} ₽ за его первый турнир.`,
+    `За рефералов на уровнях 2–10 вы получаете глубинный кэшбэк: ${depthBonusText} за первый турнир каждого нового игрока в цепочке (множитель относительно базовых 50 ₽ зависит от ранга).`,
+    'Дополнительно вы всегда получаете 10% со всех дальнейших депозитов каждого вашего прямого реферала на фишки, независимо от ранга.',
+  ];
+}
 
 const ProfilePage = () => {
   const { member } = useContext(AuthContext);
   const { logout } = useAuth();
   const navigate = useNavigate();
+
+  const [profileData, setProfileData] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(false);
 
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -56,6 +132,24 @@ const ProfilePage = () => {
       setCopyStatus('');
     }, 2000);
   };
+
+  const loadProfile = useCallback(async () => {
+    setProfileLoading(true);
+
+    try {
+      const data = await getProfile();
+      setProfileData(data || null);
+    } catch (err) {
+      const status = err && err.response ? err.response.status : null;
+
+      if (status === 401) {
+        logout();
+        navigate('/login', { replace: true });
+      }
+    } finally {
+      setProfileLoading(false);
+    }
+  }, [logout, navigate]);
 
   const loadStats = useCallback(async () => {
     setLoading(true);
@@ -129,23 +223,52 @@ const ProfilePage = () => {
   }, [logout, navigate]);
 
   useEffect(() => {
+    loadProfile();
     loadStats();
-  }, [loadStats]);
+  }, [loadProfile, loadStats]);
 
   useEffect(() => {
     loadReferralTree();
     loadReferralRewards();
   }, [loadReferralTree, loadReferralRewards]);
 
-  const referralCode = member && member.referral_code ? member.referral_code : '';
+  const profileUser = profileData || member || null;
+
+  const backendUserType = getUserTypeFromMember(profileUser);
+  const accountTypeLabel = getUserTypeLabel(backendUserType);
+  const rankCode = profileUser && profileUser.rank ? profileUser.rank : 'standard';
+  const rankLabel = getRankLabel(rankCode);
+
+  const vCoinsBalance =
+    profileUser && typeof profileUser.v_coins_balance !== 'undefined'
+      ? profileUser.v_coins_balance
+      : 0;
+
+  const cashBalance =
+    profileUser && typeof profileUser.cash_balance !== 'undefined'
+      ? profileUser.cash_balance
+      : 0;
+
+  const directReferralsCount =
+    profileUser && typeof profileUser.direct_referrals_count === 'number'
+      ? profileUser.direct_referrals_count
+      : 0;
+
+  const activeDirectReferralsCount =
+    profileUser && typeof profileUser.active_direct_referrals_count === 'number'
+      ? profileUser.active_direct_referrals_count
+      : 0;
+
+  const currentRankRule = profileUser && profileUser.current_rank_rule
+    ? profileUser.current_rank_rule
+    : null;
+
+  const referralCode = profileUser && profileUser.referral_code ? profileUser.referral_code : '';
 
   const referralLink =
     typeof window !== 'undefined'
       ? `${window.location.origin}/register${referralCode ? `?ref=${referralCode}` : ''}`
       : '';
-
-  const accountTypeLabel =
-    member && member.is_influencer ? 'Инфлюенсер' : 'Игрок';
 
   const totalReferrals =
     stats && typeof stats.total_referrals !== 'undefined' ? stats.total_referrals : 0;
@@ -168,25 +291,24 @@ const ProfilePage = () => {
 
   const history = stats && Array.isArray(stats.history) ? stats.history : [];
 
+  const rewardsSummary = rewardsData && rewardsData.summary ? rewardsData.summary : null;
+
   const totalStackCount =
-    rewardsData && typeof rewardsData.total_stack_count === 'number'
-      ? rewardsData.total_stack_count
+    rewardsSummary && typeof rewardsSummary.total_stack_count === 'number'
+      ? rewardsSummary.total_stack_count
       : 0;
 
-  const totalInfluencerAmount =
-    rewardsData && typeof rewardsData.total_influencer_amount === 'number'
-      ? rewardsData.total_influencer_amount
-      : 0;
+  const totalInfluencerAmount = rewardsSummary
+    ? rewardsSummary.total_influencer_amount
+    : 0;
 
-  const totalFirstTournamentAmount =
-    rewardsData && typeof rewardsData.total_first_tournament_amount === 'number'
-      ? rewardsData.total_first_tournament_amount
-      : 0;
+  const totalFirstTournamentAmount = rewardsSummary
+    ? rewardsSummary.total_first_tournament_amount
+    : 0;
 
-  const totalDepositPercentAmount =
-    rewardsData && typeof rewardsData.total_deposit_percent_amount === 'number'
-      ? rewardsData.total_deposit_percent_amount
-      : 0;
+  const totalDepositPercentAmount = rewardsSummary
+    ? rewardsSummary.total_deposit_percent_amount
+    : 0;
 
   const rewardsList = Array.isArray(rewardsData?.rewards)
     ? rewardsData.rewards
@@ -197,6 +319,7 @@ const ProfilePage = () => {
     : [];
 
   const handleRetry = () => {
+    loadProfile();
     loadStats();
     loadReferralTree();
     loadReferralRewards();
@@ -250,6 +373,11 @@ const ProfilePage = () => {
     return `${count} стеков`;
   };
 
+  const rewardDescriptionLines =
+    backendUserType === 'influencer'
+      ? getInfluencerRewardDescription(rankLabel, currentRankRule)
+      : getPlayerRewardDescription(rankLabel, currentRankRule);
+
   return (
     <main
       data-easytag="id1-react/src/components/Profile/index.jsx"
@@ -261,8 +389,7 @@ const ProfilePage = () => {
             <h1 className="page-title">Профиль пользователя</h1>
             <p className="page-subtitle">
               Ваш персональный кабинет участника реферальной программы покерного клуба.
-              Здесь видно, какой у вас статус, сколько игроков в структуре и сколько вы
-              уже заработали.
+              Здесь видно, какой у вас статус, какой ранг и сколько вы уже заработали.
             </p>
 
             <div className="profile-info-grid">
@@ -270,13 +397,13 @@ const ProfilePage = () => {
                 <div className="profile-info-row">
                   <div className="profile-label">Имя</div>
                   <div className="profile-value">
-                    {member && member.first_name ? member.first_name : '—'}
+                    {profileUser && profileUser.first_name ? profileUser.first_name : '—'}
                   </div>
                 </div>
                 <div className="profile-info-row">
                   <div className="profile-label">Фамилия</div>
                   <div className="profile-value">
-                    {member && member.last_name ? member.last_name : '—'}
+                    {profileUser && profileUser.last_name ? profileUser.last_name : '—'}
                   </div>
                 </div>
               </div>
@@ -285,21 +412,34 @@ const ProfilePage = () => {
                 <div className="profile-info-row">
                   <div className="profile-label">Телефон</div>
                   <div className="profile-value">
-                    {member && member.phone ? member.phone : '—'}
+                    {profileUser && profileUser.phone ? profileUser.phone : '—'}
                   </div>
                 </div>
                 <div className="profile-info-row">
                   <div className="profile-label">Email</div>
                   <div className="profile-value">
-                    {member && member.email ? member.email : '—'}
+                    {profileUser && profileUser.email ? profileUser.email : '—'}
                   </div>
                 </div>
               </div>
 
               <div className="profile-info-column">
                 <div className="profile-info-row">
-                  <div className="profile-label">Статус</div>
+                  <div className="profile-label">Тип аккаунта</div>
                   <div className="profile-tag">{accountTypeLabel}</div>
+                </div>
+                <div className="profile-info-row">
+                  <div className="profile-label">Текущий ранг</div>
+                  <div className="profile-value">{rankLabel}</div>
+                </div>
+                <div className="profile-info-row">
+                  <div className="profile-label">Прямые рефералы</div>
+                  <div className="profile-value">
+                    {directReferralsCount}{' '}
+                    <span className="profile-inline-note">
+                      (активных: {activeDirectReferralsCount})
+                    </span>
+                  </div>
                 </div>
                 {referralCode && (
                   <div className="profile-info-row">
@@ -309,6 +449,30 @@ const ProfilePage = () => {
                 )}
               </div>
             </div>
+
+            <div className="profile-balance-grid">
+              <div className="profile-balance-card">
+                <div className="profile-label">Баланс фишек (V-Coins)</div>
+                <div className="profile-balance-value">{vCoinsBalance}</div>
+                <div className="profile-stat-caption">
+                  Виртуальные фишки, которые можно использовать для участия в турнирах и
+                  внутриигровых бонусов.
+                </div>
+              </div>
+
+              <div className="profile-balance-card">
+                <div className="profile-label">Баланс в рублях</div>
+                <div className="profile-balance-value">{`${cashBalance} ₽`}</div>
+                <div className="profile-stat-caption">
+                  Денежные вознаграждения (для инфлюенсеров), доступные для вывода по
+                  правилам клуба.
+                </div>
+              </div>
+            </div>
+
+            {profileLoading && (
+              <div className="profile-status-message">Обновление профиля...</div>
+            )}
           </section>
 
           <section className="card profile-referral-card">
@@ -343,20 +507,27 @@ const ProfilePage = () => {
             <ul className="profile-rules-list">
               <li>
                 Вы получаете 1 бесплатный стартовый стек (1000 ₽ участие в турнире) за
-                каждого нового игрока в вашей структуре, который впервые приходит в клуб по
-                вашей ссылке или по ссылке ваших рефералов.
+                каждого нового игрока, который впервые приходит в клуб по вашей ссылке.
               </li>
               <li>
-                Если вы инфлюенсер, вы дополнительно получаете 1000 ₽ за первый турнир
-                каждого реферала и 10% со всех его дальнейших депозитов на фишки.
-              </li>
-              <li>
-                Структура работает в глубину: если ваш реферал приглашает новых игроков,
-                вы тоже получаете свои бонусы в соответствии с правилами программы.
+                Если ваш реферал приглашает новых игроков, вы также получаете свои бонусы
+                по всей цепочке до максимальной глубины программы.
               </li>
             </ul>
           </section>
         </div>
+
+        <section className="card profile-rank-info-card">
+          <h2 className="profile-section-title">Ваш ранг и правила вознаграждений</h2>
+          <p className="profile-section-text">
+            Размер глубинного кэшбэка и бонусов зависит от типа аккаунта и текущего ранга.
+          </p>
+          <ul className="profile-rank-rules-list">
+            {rewardDescriptionLines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </section>
 
         {loading && (
           <div className="profile-status-message">Загрузка статистики...</div>
@@ -384,10 +555,13 @@ const ProfilePage = () => {
                 Все игроки, которые впервые пришли в покерный клуб по вашей ссылке или
                 ссылкам ваших рефералов.
               </div>
+              <div className="profile-stat-caption">
+                Прямых рефералов: {directReferralsCount}, активных прямых: {activeDirectReferralsCount}.
+              </div>
             </div>
 
             <div className="card profile-stat-card">
-              <div className="profile-stat-label">Активные рефералы</div>
+              <div className="profile-stat-label">Активные рефералы (30 дней)</div>
               <div className="profile-stat-value">{activeReferrals}</div>
               <div className="profile-stat-caption">
                 Рефералы, которые посещали клуб или делали депозиты на фишки за последние 30
@@ -403,13 +577,13 @@ const ProfilePage = () => {
               </div>
             </div>
 
-            {member && member.is_influencer && (
+            {backendUserType === 'influencer' && (
               <div className="card profile-stat-card profile-stat-card-accent">
                 <div className="profile-stat-label">Заработано денег</div>
                 <div className="profile-stat-value">{`${totalMoneyEarned} ₽`}</div>
                 <div className="profile-stat-caption">
-                  1000 ₽ за первый турнир каждого реферала + 10% с последующих депозитов на
-                  фишки по вашей структуре.
+                  500 ₽ за первого турнира прямых рефералов + 10% с последующих депозитов на
+                  фишки по вашей структуре, с учётом глубинного кэшбэка по рангу.
                 </div>
               </div>
             )}
@@ -420,8 +594,8 @@ const ProfilePage = () => {
           <div className="profile-tree-header">
             <h2 className="profile-section-title">Моя структура рефералов</h2>
             <p className="profile-section-text">
-              Список всех игроков в вашей реферальной структуре с указанием уровня,
-              статуса и количества рефералов в глубину.
+              Список всех игроков в вашей реферальной структуре с указанием уровня и
+              статуса активации каждого реферала.
             </p>
           </div>
 
@@ -444,64 +618,40 @@ const ProfilePage = () => {
                 <table className="profile-tree-table">
                   <thead>
                     <tr>
-                      <th>Имя / Ник</th>
+                      <th>Пользователь</th>
+                      <th>Тип</th>
+                      <th>Ранг</th>
                       <th>Уровень</th>
                       <th>Статус</th>
-                      <th>Прямых рефералов</th>
-                      <th>Всего в глубину</th>
                     </tr>
                   </thead>
                   <tbody>
                     {treeData.map((node, index) => {
-                      const displayName =
-                        node && node.name
-                          ? node.name
-                          : node && node.username
-                          ? node.username
-                          : node && node.full_name
-                          ? node.full_name
-                          : node && node.phone
-                          ? node.phone
-                          : '-';
+                      const displayName = node && node.username
+                        ? node.username
+                        : node && node.descendant_id
+                        ? `ID ${node.descendant_id}`
+                        : '-';
 
                       const level =
-                        typeof node.level === 'number'
-                          ? node.level
-                          : typeof node.depth === 'number'
-                          ? node.depth
-                          : typeof node.tier === 'number'
-                          ? node.tier
-                          : 0;
+                        typeof node.level === 'number' && node.level > 0 ? node.level : 0;
 
-                      const isInfluencerNode = Boolean(
-                        node && (node.is_influencer || node.influencer)
+                      const nodeUserType = node && node.user_type ? node.user_type : 'player';
+                      const nodeTypeLabel = getUserTypeLabel(nodeUserType);
+
+                      const nodeRankLabel = getRankLabel(node && node.rank ? node.rank : 'standard');
+
+                      const isActive = Boolean(
+                        (node && node.is_active_referral) || (node && node.has_paid_first_bonus)
                       );
 
-                      const directCount =
-                        typeof node.direct_referrals_count === 'number'
-                          ? node.direct_referrals_count
-                          : typeof node.direct_children_count === 'number'
-                          ? node.direct_children_count
-                          : typeof node.direct_count === 'number'
-                          ? node.direct_count
-                          : 0;
-
-                      const totalCount =
-                        typeof node.total_descendants_count === 'number'
-                          ? node.total_descendants_count
-                          : typeof node.total_in_structure === 'number'
-                          ? node.total_in_structure
-                          : typeof node.total_count === 'number'
-                          ? node.total_count
-                          : 0;
-
                       return (
-                        <tr key={node.id || index}>
+                        <tr key={node.descendant_id || index}>
                           <td>{displayName}</td>
+                          <td>{nodeTypeLabel}</td>
+                          <td>{nodeRankLabel}</td>
                           <td>{level}</td>
-                          <td>{isInfluencerNode ? 'Инфлюенсер' : 'Игрок'}</td>
-                          <td>{directCount}</td>
-                          <td>{totalCount}</td>
+                          <td>{isActive ? 'Активный реферал' : 'Неактивный'}</td>
                         </tr>
                       );
                     })}
@@ -539,26 +689,27 @@ const ProfilePage = () => {
               </div>
             </div>
 
-            {totalFirstTournamentAmount > 0 && (
+            {Number(totalFirstTournamentAmount) > 0 && (
               <div className="profile-rewards-summary-card">
                 <div className="profile-stat-label">За первые турниры рефералов</div>
                 <div className="profile-stat-value">
                   {`${totalFirstTournamentAmount} ₽`}
                 </div>
                 <div className="profile-stat-caption">
-                  Сумма 1000 ₽ за первый турнир каждого приведённого игрока.
+                  Сумма 500/1000 ₽ за первый турнир каждого приведённого игрока по правилам
+                  для игроков и инфлюенсеров.
                 </div>
               </div>
             )}
 
-            {totalDepositPercentAmount > 0 && (
+            {Number(totalDepositPercentAmount) > 0 && (
               <div className="profile-rewards-summary-card">
                 <div className="profile-stat-label">Процент с депозитов на фишки</div>
                 <div className="profile-stat-value">
                   {`${totalDepositPercentAmount} ₽`}
                 </div>
                 <div className="profile-stat-caption">
-                  10% со всех дальнейших депозитов на фишки ваших рефералов в глубину.
+                  10% со всех дальнейших депозитов на фишки ваших прямых рефералов.
                 </div>
               </div>
             )}

@@ -5,8 +5,31 @@ import {
   fetchAdminMembers,
 } from '../../api/admin';
 import { fetchReferralTree, fetchReferralRewards } from '../../api/referrals';
+import { useAuth } from '../../context/AuthContext';
+
+function getUserTypeLabel(userType) {
+  if (userType === 'influencer') {
+    return 'Инфлюенсер';
+  }
+  return 'Игрок';
+}
+
+function getRankLabel(rank) {
+  if (rank === 'silver') {
+    return 'Серебряный';
+  }
+  if (rank === 'gold') {
+    return 'Золотой';
+  }
+  if (rank === 'platinum') {
+    return 'Платиновый';
+  }
+  return 'Стандарт';
+}
 
 const AdminReferralsPage = () => {
+  const { member } = useAuth();
+
   const [referrals, setReferrals] = useState([]);
   const [count, setCount] = useState(0);
   const [page, setPage] = useState(1);
@@ -314,25 +337,24 @@ const AdminReferralsPage = () => {
   };
 
   const memberTotalStackCount =
-    memberRewardsData && typeof memberRewardsData.total_stack_count === 'number'
-      ? memberRewardsData.total_stack_count
+    memberRewardsData && memberRewardsData.summary &&
+    typeof memberRewardsData.summary.total_stack_count === 'number'
+      ? memberRewardsData.summary.total_stack_count
       : 0;
 
   const memberTotalInfluencerAmount =
-    memberRewardsData && typeof memberRewardsData.total_influencer_amount === 'number'
-      ? memberRewardsData.total_influencer_amount
+    memberRewardsData && memberRewardsData.summary
+      ? memberRewardsData.summary.total_influencer_amount
       : 0;
 
   const memberTotalFirstTournamentAmount =
-    memberRewardsData &&
-    typeof memberRewardsData.total_first_tournament_amount === 'number'
-      ? memberRewardsData.total_first_tournament_amount
+    memberRewardsData && memberRewardsData.summary
+      ? memberRewardsData.summary.total_first_tournament_amount
       : 0;
 
   const memberTotalDepositPercentAmount =
-    memberRewardsData &&
-    typeof memberRewardsData.total_deposit_percent_amount === 'number'
-      ? memberRewardsData.total_deposit_percent_amount
+    memberRewardsData && memberRewardsData.summary
+      ? memberRewardsData.summary.total_deposit_percent_amount
       : 0;
 
   const memberRewardsList = Array.isArray(memberRewardsData?.rewards)
@@ -342,6 +364,20 @@ const AdminReferralsPage = () => {
     : Array.isArray(memberRewardsData)
     ? memberRewardsData
     : [];
+
+  const currentUserType = member && member.user_type ? member.user_type : member && member.is_influencer ? 'influencer' : 'player';
+  const currentRank = member && member.rank ? member.rank : 'standard';
+  const currentRankRule = member && member.current_rank_rule ? member.current_rank_rule : null;
+
+  const playerMultiplier = currentRankRule
+    ? Number(currentRankRule.player_depth_bonus_multiplier || 1)
+    : 1;
+  const influencerMultiplier = currentRankRule
+    ? Number(currentRankRule.influencer_depth_bonus_multiplier || 1)
+    : 1;
+
+  const playerDepthBonus = 100 * playerMultiplier;
+  const influencerDepthBonus = 50 * influencerMultiplier;
 
   return (
     <main
@@ -353,6 +389,15 @@ const AdminReferralsPage = () => {
         <p className="section-subtitle">
           Все регистрации по реферальным ссылкам, депозиты и начисленные бонусы.
         </p>
+
+        {member && (
+          <p className="admin-chart-subtitle">
+            Ваш текущий ранг: {getRankLabel(currentRank)}.{' '}
+            {currentUserType === 'influencer'
+              ? `За первый турнир прямого реферала вы получаете 500 ₽, а за рефералов на уровнях 2–10 — около ${influencerDepthBonus} ₽ за первый турнир каждого игрока (множитель глубинного кэшбэка по рангу). Дополнительно вы всегда получаете 10% со всех дальнейших депозитов прямых рефералов.`
+              : `За прямого реферала вы получаете 1000 V-Coins за его первый турнир, а за рефералов на уровнях 2–10 — около ${playerDepthBonus} V-Coins за первый турнир каждого игрока в глубину (множитель глубинного кэшбэка по рангу).`}
+          </p>
+        )}
       </section>
 
       <section className="card admin-filters-card">
@@ -407,8 +452,8 @@ const AdminReferralsPage = () => {
         <h3 className="admin-form-title">Добавить депозит по реферальной ссылке</h3>
         <p className="admin-form-subtitle">
           Укажите ID приглашённого игрока и сумму депозита (стоимость стека или докупки).
-          Вознаграждение рефереру будет рассчитано автоматически по правилам для игроков
-          и инфлюенсеров.
+          Вознаграждение рефереру и глубинные бонусы будут рассчитаны автоматически по
+          правилам ранговой программы.
         </p>
 
         {createError && <p className="admin-form-error">{createError}</p>}
@@ -558,8 +603,8 @@ const AdminReferralsPage = () => {
               <div className="admin-member-section">
                 <h4 className="admin-subsection-title">Структура рефералов пользователя</h4>
                 <p className="admin-subsection-caption">
-                  Все игроки в структуре выбранного пользователя с указанием уровня и
-                  количества рефералов в глубину.
+                  Все игроки в структуре выбранного пользователя с указанием уровня,
+                  ранга и статуса активации.
                 </p>
 
                 {memberTreeLoading && (
@@ -580,64 +625,44 @@ const AdminReferralsPage = () => {
                       <table className="table admin-table">
                         <thead>
                           <tr>
-                            <th>Имя / Ник</th>
+                            <th>Пользователь</th>
+                            <th>Тип</th>
+                            <th>Ранг</th>
                             <th>Уровень</th>
-                            <th>Статус</th>
-                            <th>Прямых рефералов</th>
-                            <th>Всего в глубину</th>
+                            <th>Активность</th>
+                            <th>Бонус за первый турнир</th>
                           </tr>
                         </thead>
                         <tbody>
                           {memberTreeData.map((node, index) => {
-                            const displayName =
-                              node && node.name
-                                ? node.name
-                                : node && node.username
-                                ? node.username
-                                : node && node.full_name
-                                ? node.full_name
-                                : node && node.phone
-                                ? node.phone
-                                : '-';
+                            const displayName = node && node.username
+                              ? node.username
+                              : node && node.descendant_id
+                              ? `ID ${node.descendant_id}`
+                              : '-';
 
                             const level =
-                              typeof node.level === 'number'
-                                ? node.level
-                                : typeof node.depth === 'number'
-                                ? node.depth
-                                : typeof node.tier === 'number'
-                                ? node.tier
-                                : 0;
+                              typeof node.level === 'number' && node.level > 0 ? node.level : 0;
 
-                            const isInfluencerNode = Boolean(
-                              node && (node.is_influencer || node.influencer)
+                            const nodeUserType = node && node.user_type ? node.user_type : 'player';
+                            const nodeTypeLabel = getUserTypeLabel(nodeUserType);
+
+                            const nodeRankLabel = getRankLabel(node && node.rank ? node.rank : 'standard');
+
+                            const isActive = Boolean(
+                              (node && node.is_active_referral) || (node && node.has_paid_first_bonus)
                             );
 
-                            const directCount =
-                              typeof node.direct_referrals_count === 'number'
-                                ? node.direct_referrals_count
-                                : typeof node.direct_children_count === 'number'
-                                ? node.direct_children_count
-                                : typeof node.direct_count === 'number'
-                                ? node.direct_count
-                                : 0;
-
-                            const totalCount =
-                              typeof node.total_descendants_count === 'number'
-                                ? node.total_descendants_count
-                                : typeof node.total_in_structure === 'number'
-                                ? node.total_in_structure
-                                : typeof node.total_count === 'number'
-                                ? node.total_count
-                                : 0;
+                            const hasPaidFirstBonus = Boolean(node && node.has_paid_first_bonus);
 
                             return (
-                              <tr key={node.id || index}>
+                              <tr key={node.descendant_id || index}>
                                 <td>{displayName}</td>
+                                <td>{nodeTypeLabel}</td>
+                                <td>{nodeRankLabel}</td>
                                 <td>{level}</td>
-                                <td>{isInfluencerNode ? 'Инфлюенсер' : 'Игрок'}</td>
-                                <td>{directCount}</td>
-                                <td>{totalCount}</td>
+                                <td>{isActive ? 'Активный' : 'Неактивный'}</td>
+                                <td>{hasPaidFirstBonus ? 'Выплачен' : 'Не выплачен'}</td>
                               </tr>
                             );
                           })}
@@ -667,14 +692,15 @@ const AdminReferralsPage = () => {
                   <div className="admin-member-summary-card">
                     <div className="admin-stat-title">Сумма как инфлюенсера</div>
                     <div className="admin-stat-value">
-                      {memberTotalInfluencerAmount} <span className="admin-stat-unit">₽</span>
+                      {memberTotalInfluencerAmount}{' '}
+                      <span className="admin-stat-unit">₽</span>
                     </div>
                     <div className="admin-stat-caption">
                       Сумма всех денежных вознаграждений по структуре.
                     </div>
                   </div>
 
-                  {memberTotalFirstTournamentAmount > 0 && (
+                  {Number(memberTotalFirstTournamentAmount) > 0 && (
                     <div className="admin-member-summary-card">
                       <div className="admin-stat-title">Первые турниры</div>
                       <div className="admin-stat-value">
@@ -682,12 +708,12 @@ const AdminReferralsPage = () => {
                         <span className="admin-stat-unit">₽</span>
                       </div>
                       <div className="admin-stat-caption">
-                        1000 ₽ за первый турнир каждого приведённого игрока.
+                        500/1000 ₽ за первый турнир каждого приведённого игрока.
                       </div>
                     </div>
                   )}
 
-                  {memberTotalDepositPercentAmount > 0 && (
+                  {Number(memberTotalDepositPercentAmount) > 0 && (
                     <div className="admin-member-summary-card">
                       <div className="admin-stat-title">Процент с депозитов</div>
                       <div className="admin-stat-value">
