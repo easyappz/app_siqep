@@ -11,7 +11,7 @@ import {
   Legend,
 } from 'recharts';
 import { AuthContext, useAuth } from '../../context/AuthContext';
-import { getProfile, fetchProfileStats } from '../../api/profile';
+import { getProfile, fetchProfileStats, updateProfile } from '../../api/profile';
 import { fetchReferralTree, fetchReferralRewards } from '../../api/referrals';
 
 function getUserTypeFromMember(member) {
@@ -89,7 +89,7 @@ function getInfluencerRewardDescription(rankLabel, currentRankRule) {
 
 const ProfilePage = () => {
   const { member } = useContext(AuthContext);
-  const { logout } = useAuth();
+  const { logout, setMember } = useAuth();
   const navigate = useNavigate();
 
   const [profileData, setProfileData] = useState(null);
@@ -107,6 +107,12 @@ const ProfilePage = () => {
   const [rewardsData, setRewardsData] = useState(null);
   const [isLoadingRewards, setIsLoadingRewards] = useState(false);
   const [rewardsError, setRewardsError] = useState('');
+
+  const [bankDetails, setBankDetails] = useState('');
+  const [cryptoWallet, setCryptoWallet] = useState('');
+  const [isSavingPayout, setIsSavingPayout] = useState(false);
+  const [payoutError, setPayoutError] = useState('');
+  const [payoutSuccess, setPayoutSuccess] = useState('');
 
   const handleCopyLink = async (link) => {
     if (!link) {
@@ -232,6 +238,13 @@ const ProfilePage = () => {
     loadReferralRewards();
   }, [loadReferralTree, loadReferralRewards]);
 
+  useEffect(() => {
+    if (profileData) {
+      setBankDetails(profileData.withdrawal_bank_details || '');
+      setCryptoWallet(profileData.withdrawal_crypto_wallet || '');
+    }
+  }, [profileData]);
+
   const profileUser = profileData || member || null;
 
   const backendUserType = getUserTypeFromMember(profileUser);
@@ -291,6 +304,21 @@ const ProfilePage = () => {
 
   const history = stats && Array.isArray(stats.history) ? stats.history : [];
 
+  const myDepositsTotalAmount =
+    stats && typeof stats.my_deposits_total_amount === 'number'
+      ? stats.my_deposits_total_amount
+      : 0;
+
+  const myDepositsCount =
+    stats && typeof stats.my_deposits_count === 'number'
+      ? stats.my_deposits_count
+      : 0;
+
+  const myDeposits =
+    stats && Array.isArray(stats.my_deposits)
+      ? stats.my_deposits
+      : [];
+
   const rewardsSummary = rewardsData && rewardsData.summary ? rewardsData.summary : null;
 
   const totalStackCount =
@@ -323,6 +351,55 @@ const ProfilePage = () => {
     loadStats();
     loadReferralTree();
     loadReferralRewards();
+  };
+
+  const handleSavePayoutDetails = async (event) => {
+    if (event && event.preventDefault) {
+      event.preventDefault();
+    }
+
+    setPayoutError('');
+    setPayoutSuccess('');
+    setIsSavingPayout(true);
+
+    try {
+      const payload = {
+        withdrawal_bank_details: bankDetails || null,
+        withdrawal_crypto_wallet: cryptoWallet || null,
+      };
+
+      const updatedMember = await updateProfile(payload);
+
+      setProfileData(updatedMember || null);
+      if (setMember) {
+        setMember(updatedMember || null);
+      }
+
+      setPayoutSuccess('Реквизиты для вывода успешно сохранены.');
+    } catch (err) {
+      const status = err && err.response ? err.response.status : null;
+
+      if (status === 401) {
+        logout();
+        navigate('/login', { replace: true });
+        return;
+      }
+
+      let message = 'Не удалось сохранить реквизиты. Попробуйте ещё раз.';
+
+      if (err && err.response && err.response.data) {
+        const data = err.response.data;
+        if (typeof data.detail === 'string') {
+          message = data.detail;
+        } else if (typeof data.error === 'string') {
+          message = data.error;
+        }
+      }
+
+      setPayoutError(message);
+    } finally {
+      setIsSavingPayout(false);
+    }
   };
 
   const formatRewardTypeLabel = (rewardType) => {
@@ -529,6 +606,68 @@ const ProfilePage = () => {
           </ul>
         </section>
 
+        {backendUserType === 'influencer' && (
+          <section className="card profile-payout-card">
+            <h2 className="profile-section-title">Реквизиты для вывода средств</h2>
+            <p className="profile-section-text">
+              Укажите реквизиты банковской карты или криптокошелька, куда клуб будет
+              переводить ваши денежные вознаграждения как инфлюенсера.
+            </p>
+
+            <form className="profile-payout-form" onSubmit={handleSavePayoutDetails}>
+              <div className="profile-form-row">
+                <label className="profile-label" htmlFor="bankDetails">
+                  Банковская карта / счёт
+                </label>
+                <textarea
+                  id="bankDetails"
+                  className="profile-textarea"
+                  value={bankDetails}
+                  onChange={(event) => setBankDetails(event.target.value)}
+                  placeholder="Например: номер карты, банк, ФИО получателя"
+                  rows={3}
+                />
+              </div>
+
+              <div className="profile-form-row">
+                <label className="profile-label" htmlFor="cryptoWallet">
+                  Криптокошелёк
+                </label>
+                <textarea
+                  id="cryptoWallet"
+                  className="profile-textarea"
+                  value={cryptoWallet}
+                  onChange={(event) => setCryptoWallet(event.target.value)}
+                  placeholder="Например: адрес USDT (TRC-20) или другого токена"
+                  rows={3}
+                />
+              </div>
+
+              {payoutError && (
+                <div className="profile-status-message profile-status-error">
+                  {payoutError}
+                </div>
+              )}
+
+              {payoutSuccess && (
+                <div className="profile-status-message profile-status-success">
+                  {payoutSuccess}
+                </div>
+              )}
+
+              <div className="profile-form-actions">
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={isSavingPayout}
+                >
+                  {isSavingPayout ? 'Сохранение...' : 'Сохранить реквизиты'}
+                </button>
+              </div>
+            </form>
+          </section>
+        )}
+
         {loading && (
           <div className="profile-status-message">Загрузка статистики...</div>
         )}
@@ -588,6 +727,55 @@ const ProfilePage = () => {
               </div>
             )}
           </div>
+        </section>
+
+        <section className="card profile-deposits-card">
+          <div className="profile-deposits-header">
+            <h2 className="profile-section-title">Мои депозиты на фишки</h2>
+            <p className="profile-section-text">
+              История покупок турнирных фишек (депозитов) в клубе, которые используются для
+              расчёта реферальных вознаграждений инфлюенсеров.
+            </p>
+          </div>
+
+          <div className="profile-deposits-summary">
+            <div className="profile-stat-label">Всего депозитов</div>
+            <div className="profile-stat-value">{myDepositsCount}</div>
+            <div className="profile-stat-caption">
+              Общее количество покупок фишек, зафиксированных в системе.
+            </div>
+
+            <div className="profile-stat-label">Сумма депозитов</div>
+            <div className="profile-stat-value">{`${myDepositsTotalAmount} ₽`}</div>
+            <div className="profile-stat-caption">
+              Сумма всех ваших депозитов (стеков и докупок) в рублях.
+            </div>
+          </div>
+
+          {myDeposits.length === 0 ? (
+            <div className="profile-deposits-empty">
+              У вас пока нет зафиксированных депозитов на фишки.
+            </div>
+          ) : (
+            <div className="profile-deposits-table-wrapper">
+              <table className="profile-deposits-table">
+                <thead>
+                  <tr>
+                    <th>Дата</th>
+                    <th>Сумма депозита</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {myDeposits.map((item, index) => (
+                    <tr key={item.id || `${item.date}-${index}`}>
+                      <td>{item.date || '—'}</td>
+                      <td>{`${item.amount} ₽`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
 
         <section className="card profile-tree-card">

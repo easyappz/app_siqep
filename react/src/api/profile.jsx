@@ -9,3 +9,8 @@ export async function fetchProfileStats() {
   const response = await instance.get('/api/profile/stats/');
   return response.data;
 }
+
+export async function updateProfile(data) {
+  const response = await instance.patch('/api/auth/me/', data);
+  return response.data;
+}
