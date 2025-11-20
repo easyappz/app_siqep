@@ -1,10 +1,11 @@
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Member, ReferralEvent, ReferralReward
+from .models import Member, ReferralEvent, ReferralReward, ReferralRelation
 from .referral_utils import (
-    create_player_stack_rewards_for_new_member,
-    create_influencer_deposit_rewards,
+    on_new_user_registered,
+    on_user_first_tournament_completed,
+    on_member_deposit,
 )
 
 
@@ -62,15 +63,15 @@ class RegistrationSerializer(serializers.Serializer):
     Creates a new Member and optionally links it to a referrer by referral_code.
 
     When a new member is successfully registered with a referrer, the following
-    business logic is applied:
+    business logic is applied (new ranked referral system):
     - The direct referrer receives a ReferralEvent with a fixed deposit_amount
       (1000 ₽ – стартовый стек) for backward-compatible analytics.
-    - All ancestors in the referral chain (including the direct referrer) receive
-      one free starting stack via ReferralReward with type PLAYER_STACK. This
-      works for arbitrary depth of the referral tree.
-    - Monetary rewards for influencers (1000 ₽ за первый турнир и 10% от
-      дальнейших депозитов) are created later when concrete deposit events are
-      recorded via the admin deposit endpoint.
+    - The ranked referral tree (ReferralRelation) is built via
+      `on_new_user_registered`, so that first-tournament logic can later
+      distribute V-Coins/₽ rewards in depth.
+    - Monetary and V-Coins rewards are *not* granted at registration time.
+      They are granted when the new member completes their first paid
+      tournament / qualifying deposit via `on_user_first_tournament_completed`.
     """
 
     first_name = serializers.CharField(max_length=100)
@@ -125,12 +126,11 @@ class RegistrationSerializer(serializers.Serializer):
     def create(self, validated_data: dict) -> Member:
         """Create a new Member and apply referral business logic.
 
-        - The direct referrer receives a ReferralEvent with deposit_amount = 1000.
-        - All ancestors in the chain receive a PLAYER_STACK ReferralReward
-          (1 free starting stack) with depth starting from 1 for the direct
-          referrer, 2 for the next level, and so on.
-        - Influencer monetary rewards are generated later from concrete deposit
-          events (AdminCreateReferralEventSerializer).
+        - The direct referrer receives a ReferralEvent with deposit_amount = 1000
+          (для статистики и обратной совместимости).
+        - The deep referral tree is constructed via `on_new_user_registered`.
+        - Финансовые бонусы (V-Coins/₽) начисляются позже, когда реферал
+          завершает свой первый платный турнир/депозит.
         """
 
         referrer = validated_data.pop("referrer", None)
@@ -159,8 +159,10 @@ class RegistrationSerializer(serializers.Serializer):
                     "Пользователь не может использовать собственный реферальный код."
                 )
 
+            # Keep legacy field and new referrer field in sync.
             member.referred_by = referrer
-            member.save(update_fields=["referred_by"])
+            member.referrer = referrer
+            member.save(update_fields=["referred_by", "referrer"])
 
             deposit_amount = 1000
             if referrer.is_influencer:
@@ -179,8 +181,8 @@ class RegistrationSerializer(serializers.Serializer):
                 deposit_amount=deposit_amount,
             )
 
-            # New deep referral logic: stacks for all ancestors.
-            create_player_stack_rewards_for_new_member(member)
+            # New referral graph for ranked system.
+            on_new_user_registered(member)
 
         return member
 
@@ -439,12 +441,13 @@ class AdminCreateReferralEventSerializer(serializers.Serializer):
     """Serializer for creating referral/deposit events from the admin panel.
 
     This serializer records a concrete deposit (stack/rebuy) for a referred member
-    and applies business rules for influencers vs regular players.
+    and applies business rules for the ranked referral system.
 
-    For influencers in the referral chain, deep multi-level rewards are generated
-    via ReferralReward:
-    - 1000 ₽ за первый турнир реферала (тип INFLUENCER_FIRST_TOURNAMENT);
-    - 10% со всех дальнейших депозитов (тип INFLUENCER_DEPOSIT_PERCENT).
+    - For the first qualifying tournament/deposit of a referred member,
+      `on_user_first_tournament_completed` is called once to distribute deep
+      one-time bonuses in V-Coins/₽ across the referral tree.
+    - For every deposit, `on_member_deposit` is called to apply the lifetime
+      10% commission to the direct influencer referrer (if any).
     """
 
     referred_id = serializers.IntegerField(help_text="ID приглашённого игрока (Member.id).")
@@ -477,7 +480,10 @@ class AdminCreateReferralEventSerializer(serializers.Serializer):
                 {"referred_id": "Пользователь с указанным ID не найден."}
             )
 
-        if referred.referred_by is None:
+        # For new logic we prefer the explicit `referrer` field, but for
+        # backward compatibility we also accept legacy `referred_by`.
+        referrer = referred.referrer or referred.referred_by
+        if referrer is None:
             raise serializers.ValidationError(
                 {
                     "referred_id": (
@@ -490,14 +496,15 @@ class AdminCreateReferralEventSerializer(serializers.Serializer):
         return attrs
 
     def create(self, validated_data):
+        from decimal import Decimal as _Decimal
+
         referred: Member = validated_data["referred"]
-        referrer: Member = referred.referred_by
+        referrer: Member | None = referred.referrer or referred.referred_by
 
         deposit_amount: int = validated_data["deposit_amount"]
         created_at = validated_data.get("created_at") or timezone.now()
 
-        # For analytics and compatibility we still store a ReferralEvent record,
-        # but all deep influencer rewards are handled by ReferralReward.
+        # For analytics and compatibility we still store a ReferralEvent record.
         event = ReferralEvent.objects.create(
             referrer=referrer,
             referred=referred,
@@ -507,12 +514,18 @@ class AdminCreateReferralEventSerializer(serializers.Serializer):
             created_at=created_at,
         )
 
-        # Deep influencer rewards (first tournament + 10% of further deposits).
-        create_influencer_deposit_rewards(
-            source_member=referred,
-            deposit_amount=deposit_amount,
-            event_time=created_at,
-        )
+        # Determine if this is the first tournament/deposit for this member
+        # in the context of the referral program.
+        has_any_first_bonus = ReferralRelation.objects.filter(
+            descendant=referred,
+            has_paid_first_bonus=True,
+        ).exists()
+
+        if not has_any_first_bonus:
+            on_user_first_tournament_completed(referred)
+
+        # Lifetime 10% commission to direct influencer referrer (if any).
+        on_member_deposit(referred, _Decimal(deposit_amount))
 
         return event
 
