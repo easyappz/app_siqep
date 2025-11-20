@@ -77,6 +77,22 @@ class Member(models.Model):
         decimal_places=2,
         default=Decimal("0.00"),
     )
+    withdrawal_bank_details = models.TextField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Реквизиты банковской карты/счёта для вывода средств (видит только "
+            "владелец аккаунта и администратор)."
+        ),
+    )
+    withdrawal_crypto_wallet = models.TextField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Адрес криптовалютного кошелька для вывода средств (видит только "
+            "владелец аккаунта и администратор)."
+        ),
+    )
 
     # Legacy referral fields kept for backward compatibility
     referral_code = models.CharField(

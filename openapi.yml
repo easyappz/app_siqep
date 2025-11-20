@@ -80,6 +80,30 @@ paths:
                 $ref: '#/components/schemas/Member'
         '401':
           description: Требуется аутентификация
+    patch:
+      operationId: auth_me_partial_update
+      description: 'Обновить профиль текущего пользователя: имя, фамилию, email и реквизиты для вывода средств.'
+      tags:
+        - auth
+      security:
+        - MemberTokenAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeUpdateRequest'
+      responses:
+        '200':
+          description: 'Обновлённый профиль пользователя.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Member'
+        '400':
+          description: 'Ошибка валидации данных.'
+        '401':
+          description: 'Требуется аутентификация.'
   /api/profile/stats/:
     get:
       operationId: profile_stats_retrieve
@@ -547,6 +571,14 @@ components:
             - $ref: '#/components/schemas/RankRuleSummary'
           nullable: true
           description: 'Порог и множители глубинного кэшбэка для текущего ранга пользователя.'
+        withdrawal_bank_details:
+          type: string
+          nullable: true
+          description: 'Реквизиты банковской карты/счёта для вывода средств (видит только владелец аккаунта и администратор).'
+        withdrawal_crypto_wallet:
+          type: string
+          nullable: true
+          description: 'Адрес криптовалютного кошелька для вывода средств (видит только владелец аккаунта и администратор).'
       required:
         - id
         - first_name
@@ -1339,6 +1371,30 @@ components:
       required:
         - players
         - timур
+    MeUpdateRequest:
+      type: object
+      description: 'Данные для обновления профиля текущего пользователя и реквизитов вывода.'
+      properties:
+        first_name:
+          type: string
+          description: 'Имя пользователя.'
+        last_name:
+          type: string
+          description: 'Фамилия пользователя.'
+        email:
+          type: string
+          format: email
+          nullable: true
+          description: 'Электронная почта пользователя.'
+        withdrawal_bank_details:
+          type: string
+          nullable: true
+          description: 'Реквизиты банковской карты/счёта для вывода средств.'
+        withdrawal_crypto_wallet:
+          type: string
+          nullable: true
+          description: 'Адрес криптовалютного кошелька для вывода средств.'
+      required: []
   securitySchemes:
     basicAuth:
       type: http

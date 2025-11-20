@@ -21,6 +21,7 @@ from .serializers import (
     MemberSerializer,
     RegistrationSerializer,
     LoginSerializer,
+    MeUpdateSerializer,
     ProfileStatsSerializer,
     ReferralNodeSerializer,
     ReferralRewardSerializer,
@@ -104,7 +105,7 @@ class LoginView(APIView):
 
 
 class MeView(APIView):
-    """Return profile of the currently authenticated member."""
+    """Return and update profile of the currently authenticated member."""
 
     authentication_classes = [MemberTokenAuthentication]
     permission_classes = [IsAuthenticated]
@@ -116,6 +117,26 @@ class MeView(APIView):
     def get(self, request):
         serializer = MemberSerializer(request.user)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        request=MeUpdateSerializer,
+        responses={200: MemberSerializer},
+        description=(
+            "Обновить профиль текущего пользователя: имя, фамилию, email и реквизиты "
+            "для вывода средств (банк/криптокошелёк)."
+        ),
+    )
+    def patch(self, request):
+        member: Member = request.user
+        serializer = MeUpdateSerializer(
+            instance=member,
+            data=request.data,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        output_serializer = MemberSerializer(member)
+        return Response(output_serializer.data, status=status.HTTP_200_OK)
 
 
 class ProfileStatsView(APIView):

@@ -56,6 +56,8 @@ class MemberSerializer(serializers.ModelSerializer):
             "direct_referrals_count",
             "active_direct_referrals_count",
             "current_rank_rule",
+            "withdrawal_bank_details",
+            "withdrawal_crypto_wallet",
         ]
         read_only_fields = [
             "id",
@@ -71,6 +73,8 @@ class MemberSerializer(serializers.ModelSerializer):
             "direct_referrals_count",
             "active_direct_referrals_count",
             "current_rank_rule",
+            "withdrawal_bank_details",
+            "withdrawal_crypto_wallet",
         ]
 
     def get_direct_referrals_count(self, obj: Member) -> int:
@@ -269,6 +273,33 @@ class LoginSerializer(serializers.Serializer):
 
         attrs["member"] = member
         return attrs
+
+
+class MeUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for updating the current member's profile and payout details."""
+
+    class Meta:
+        model = Member
+        fields = [
+            "first_name",
+            "last_name",
+            "email",
+            "withdrawal_bank_details",
+            "withdrawal_crypto_wallet",
+        ]
+
+    def validate_email(self, value: str) -> str:
+        if not value:
+            return value
+        member = self.instance
+        qs = Member.objects.filter(email=value)
+        if member is not None:
+            qs = qs.exclude(pk=member.pk)
+        if qs.exists():
+            raise serializers.ValidationError(
+                "Пользователь с такой электронной почтой уже существует."
+            )
+        return value
 
 
 class ReferralHistoryItemSerializer(serializers.Serializer):
