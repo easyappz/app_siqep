@@ -239,13 +239,6 @@ const PasswordResetPage = () => {
                 <div className="auth-message auth-message-success">{requestMessage}</div>
               )}
 
-              {devCode && (
-                <div className="auth-message auth-message-info">
-                  <strong>Код для тестирования:</strong> {devCode}
-                  <div>Этот код показывается только в режиме разработки, чтобы упростить тестирование.</div>
-                </div>
-              )}
-
               <div className="auth-form-footer">
                 <button
                   type="submit"
@@ -379,6 +372,16 @@ const PasswordResetPage = () => {
                 </button>
               </p>
             </form>
+          )}
+
+          {devCode && (
+            <div className="auth-message auth-message-info">
+              <strong>Тестовый код для сброса пароля:</strong> {devCode}
+              <div>
+                Этот код показывается только в режиме разработки, чтобы упростить тестирование.
+                Введите его в поле «Код подтверждения» на этом шаге.
+              </div>
+            </div>
           )}
         </div>
       </div>
