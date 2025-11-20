@@ -472,8 +472,8 @@ class TestSimulateDemoDepositsAPITests(TestCase):
         timur_after_second = self.timur.cash_balance
         self.assertEqual(timur_after_second, timur_after_first)
 
-        timur_data = data2["timur"]
-        earnings_delta = Decimal(str(timur_data["earnings_delta"]))
+        timур_data = data2["timur"]
+        earnings_delta = Decimal(str(timур_data["earnings_delta"]))
         self.assertEqual(earnings_delta, Decimal("0.00"))
 
         for phone in players_phones:
@@ -740,3 +740,116 @@ class PasswordResetAPITests(TestCase):
         data = second_confirm.json()
         self.assertIn("code", data)
         self.assertEqual(data["code"], ["Неверный или просроченный код."])
+
+
+class AdminResetMemberPasswordAPITests(TestCase):
+    """Tests for admin-only member password reset endpoint."""
+
+    def setUp(self):
+        self.client = APIClient()
+
+        self.admin = Member(
+            first_name="Admin",
+            last_name="User",
+            phone="+79990003333",
+            email="admin@example.com",
+            is_influencer=False,
+            is_admin=True,
+        )
+        self.admin.set_password("adminpass123")
+        self.admin.save()
+
+        self.member = Member(
+            first_name="Target",
+            last_name="User",
+            phone="+79990004444",
+            email="target@example.com",
+            is_influencer=False,
+            is_admin=False,
+        )
+        self.member.set_password("userold123")
+        self.member.save()
+
+        token = MemberAuthToken.create_for_member(self.admin)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+    def test_admin_reset_with_provided_password(self):
+        url = f"/api/admin/members/{self.member.id}/reset-password/"
+        new_password = "AdminNew123"
+
+        response = self.client.post(
+            url,
+            {"new_password": new_password},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(
+            data.get("detail"),
+            "Пароль пользователя успешно сброшен администратором.",
+        )
+        self.assertEqual(data.get("generated_password"), new_password)
+
+        # Login with new password should succeed
+        login_client = APIClient()
+        login_response_new = login_client.post(
+            "/api/auth/login/",
+            {"phone": self.member.phone, "password": new_password},
+            format="json",
+        )
+        self.assertEqual(login_response_new.status_code, 200)
+
+        # Old password should fail
+        login_response_old = login_client.post(
+            "/api/auth/login/",
+            {"phone": self.member.phone, "password": "userold123"},
+            format="json",
+        )
+        self.assertEqual(login_response_old.status_code, 400)
+
+    def test_admin_reset_with_generated_password(self):
+        url = f"/api/admin/members/{self.member.id}/reset-password/"
+
+        response = self.client.post(url, {}, format="json")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        generated_password = data.get("generated_password")
+
+        self.assertIsNotNone(generated_password)
+        self.assertGreaterEqual(len(generated_password), 6)
+
+        # Login with generated password should succeed
+        login_client = APIClient()
+        login_response = login_client.post(
+            "/api/auth/login/",
+            {"phone": self.member.phone, "password": generated_password},
+            format="json",
+        )
+        self.assertEqual(login_response.status_code, 200)
+
+    def test_admin_reset_forbidden_for_non_admin(self):
+        non_admin = Member(
+            first_name="Regular",
+            last_name="User",
+            phone="+79990005555",
+            email="regular@example.com",
+            is_influencer=False,
+            is_admin=False,
+        )
+        non_admin.set_password("regular123")
+        non_admin.save()
+
+        token = MemberAuthToken.create_for_member(non_admin)
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+        url = f"/api/admin/members/{self.member.id}/reset-password/"
+        response = client.post(url, {"new_password": "SomePass123"}, format="json")
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_reset_member_not_found(self):
+        url = "/api/admin/members/999999/reset-password/"
+        response = self.client.post(url, {}, format="json")
+        self.assertEqual(response.status_code, 404)
+        data = response.json()
+        self.assertEqual(data.get("detail"), "Пользователь не найден.")

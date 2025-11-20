@@ -14,6 +14,7 @@ from .views import (
     WithdrawalRequestListCreateView,
     AdminMemberListCreateView,
     AdminMemberDetailView,
+    AdminResetMemberPasswordView,
     AdminReferralEventListView,
     AdminStatsOverviewView,
     TestSimulateDepositsView,
@@ -62,6 +63,11 @@ urlpatterns = [
         "admin/members/<int:pk>/",
         AdminMemberDetailView.as_view(),
         name="admin-members-detail",
+    ),
+    path(
+        "admin/members/<int:pk>/reset-password/",
+        AdminResetMemberPasswordView.as_view(),
+        name="admin-members-reset-password",
     ),
     path(
         "admin/referrals/",

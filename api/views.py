@@ -1,3 +1,4 @@
+import secrets
 from datetime import timedelta, datetime
 from decimal import Decimal
 
@@ -38,6 +39,7 @@ from .serializers import (
     ReferralRewardsSummarySerializer,
     AdminMemberSerializer,
     AdminCreateMemberSerializer,
+    AdminResetMemberPasswordSerializer,
     ReferralEventAdminSerializer,
     AdminStatsOverviewSerializer,
     AdminCreateReferralEventSerializer,
@@ -546,6 +548,50 @@ class AdminMemberDetailView(generics.RetrieveUpdateAPIView):
     queryset = Member.objects.all()
     serializer_class = AdminMemberSerializer
     lookup_field = "pk"
+
+
+class AdminResetMemberPasswordView(APIView):
+    """Admin-only endpoint to reset a member's password by ID.
+
+    If new_password is not provided or is empty, a random secure password
+    is generated and returned in the response.
+    """
+
+    authentication_classes = [MemberTokenAuthentication]
+    permission_classes = [IsAuthenticated, IsAdminMember]
+
+    def post(self, request, pk: int):
+        serializer = AdminResetMemberPasswordSerializer(data=request.data or {})
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            member = Member.objects.get(pk=pk)
+        except Member.DoesNotExist:
+            return Response(
+                {"detail": "Пользователь не найден."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        new_password = serializer.validated_data.get("new_password")
+
+        if not new_password:
+            alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+            length = 12
+            chars = []
+            for _ in range(length):
+                index = secrets.randbelow(len(alphabet))
+                chars.append(alphabet[index])
+            new_password = "".join(chars)
+
+        member.set_password(new_password)
+        member.save(update_fields=["password_hash"])
+
+        response_data = {
+            "detail": "Пароль пользователя успешно сброшен администратором.",
+            "generated_password": new_password,
+        }
+        return Response(response_data, status=status.HTTP_200_OK)
 
 
 class AdminReferralEventListView(generics.ListCreateAPIView):

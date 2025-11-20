@@ -429,6 +429,41 @@ paths:
           description: Требуется аутентификация
         '404':
           description: Пользователь не найден
+  /api/admin/members/{id}/reset-password/:
+    post:
+      operationId: admin_members_reset_password_create
+      summary: 'Админ-панель: Сброс пароля пользователя'
+      description: 'Сбрасывает пароль указанного пользователя. Администратор может передать новый пароль вручную или оставить поле пустым, чтобы система сгенерировала случайный безопасный пароль.'
+      tags:
+        - admin
+      security:
+        - MemberTokenAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 'ID пользователя, для которого нужно сбросить пароль.'
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminResetMemberPasswordRequest'
+      responses:
+        '200':
+          description: 'Пароль пользователя успешно сброшен администратором.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminResetMemberPasswordResponse'
+        '400':
+          description: 'Ошибка валидации нового пароля.'
+        '403':
+          description: 'Доступ запрещён (недостаточно прав администратора).'
+        '404':
+          description: 'Пользователь не найден.'
   /api/admin/referrals/:
     get:
       operationId: admin_referrals_list
@@ -1248,6 +1283,29 @@ components:
         - last_name
         - phone
         - password
+    AdminResetMemberPasswordRequest:
+      type: object
+      description: 'Данные для админского сброса пароля пользователя.'
+      properties:
+        new_password:
+          type: string
+          format: password
+          nullable: true
+          description: 'Новый пароль (минимум 6 символов). Если не указан или пустой, система сгенерирует случайный безопасный пароль.'
+      required: []
+    AdminResetMemberPasswordResponse:
+      type: object
+      description: 'Ответ при успешном админском сбросе пароля пользователя.'
+      properties:
+        detail:
+          type: string
+          description: 'Сообщение об успешном сбросе пароля.'
+        generated_password:
+          type: string
+          description: 'Пароль, установленный пользователю (либо указанный администратором, либо сгенерированный системой).'
+      required:
+        - detail
+        - generated_password
     AdminCreateReferralEventRequest:
       type: object
       description: 'Данные для создания реферального события (депозита) через админ-панель.'
