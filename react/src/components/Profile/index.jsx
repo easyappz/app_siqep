@@ -346,6 +346,24 @@ const ProfilePage = () => {
     ? rewardsData
     : [];
 
+  const totalDepositsAmountRub =
+    profileUser && profileUser.total_deposits !== null && typeof profileUser.total_deposits !== 'undefined'
+      ? profileUser.total_deposits
+      : '0.00';
+
+  const profileDeposits =
+    profileUser && Array.isArray(profileUser.deposits) ? profileUser.deposits : [];
+
+  const totalInfluencerEarningsValue =
+    profileUser && profileUser.total_influencer_earnings !== null && typeof profileUser.total_influencer_earnings !== 'undefined'
+      ? profileUser.total_influencer_earnings
+      : '0.00';
+
+  const isInfluencerProfile =
+    backendUserType === 'influencer' ||
+    Boolean(profileUser && profileUser.is_influencer) ||
+    Number(totalInfluencerEarningsValue) > 0;
+
   const handleRetry = () => {
     loadProfile();
     loadStats();
@@ -606,6 +624,30 @@ const ProfilePage = () => {
           </ul>
         </section>
 
+        {isInfluencerProfile && (
+          <section className="card profile-influencer-earnings-card">
+            <h2 className="profile-section-title">Заработано как инфлюенсер</h2>
+            <p className="profile-section-text">
+              Суммарный заработок по инфлюенсерской программе: бонусы за первые турниры
+              ваших рефералов и процент с их депозитов на фишки.
+            </p>
+
+            <div className="profile-balance-grid">
+              <div className="profile-balance-card">
+                <div className="profile-label">Всего заработано</div>
+                <div className="profile-balance-value">
+                  {`${totalInfluencerEarningsValue} ₽`}
+                </div>
+                <div className="profile-stat-caption">
+                  Включает все денежные вознаграждения за рефералов, в том числе
+                  демонстрационные депозиты игроков Амир и Альфира, если они были
+                  смоделированы в системе.
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
         {backendUserType === 'influencer' && (
           <section className="card profile-payout-card">
             <h2 className="profile-section-title">Реквизиты для вывода средств</h2>
@@ -731,28 +773,21 @@ const ProfilePage = () => {
 
         <section className="card profile-deposits-card">
           <div className="profile-deposits-header">
-            <h2 className="profile-section-title">Мои депозиты на фишки</h2>
+            <h2 className="profile-section-title">Депозиты</h2>
             <p className="profile-section-text">
-              История покупок турнирных фишек (депозитов) в клубе, которые используются для
-              расчёта реферальных вознаграждений инфлюенсеров.
+              Здесь отображаются все зафиксированные депозиты на фишки для вашего профиля.
+              В демонстрационном режиме сюда также входят тестовые депозиты (например,
+              2000 ₽ для игроков Амир и Альфира).
             </p>
           </div>
 
           <div className="profile-deposits-summary">
-            <div className="profile-stat-label">Всего депозитов</div>
-            <div className="profile-stat-value">{myDepositsCount}</div>
-            <div className="profile-stat-caption">
-              Общее количество покупок фишек, зафиксированных в системе.
-            </div>
-
-            <div className="profile-stat-label">Сумма депозитов</div>
-            <div className="profile-stat-value">{`${myDepositsTotalAmount} ₽`}</div>
-            <div className="profile-stat-caption">
-              Сумма всех ваших депозитов (стеков и докупок) в рублях.
-            </div>
+            <p className="profile-deposits-summary-line">
+              Всего депозитов: <strong>{`${totalDepositsAmountRub} ₽`}</strong>
+            </p>
           </div>
 
-          {myDeposits.length === 0 ? (
+          {profileDeposits.length === 0 ? (
             <div className="profile-deposits-empty">
               У вас пока нет зафиксированных депозитов на фишки.
             </div>
@@ -761,19 +796,46 @@ const ProfilePage = () => {
               <table className="profile-deposits-table">
                 <thead>
                   <tr>
+                    <th>Сумма</th>
+                    <th>Валюта</th>
+                    <th>Тестовый</th>
                     <th>Дата</th>
-                    <th>Сумма депозита</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {myDeposits.map((item, index) => (
-                    <tr key={item.id || `${item.date}-${index}`}>
-                      <td>{item.date || '—'}</td>
-                      <td>{`${item.amount} ₽`}</td>
-                    </tr>
-                  ))}
+                  {profileDeposits.map((deposit) => {
+                    const key = deposit.id || deposit.created_at || deposit.amount;
+                    const isTest = Boolean(deposit.is_test);
+
+                    const amountText =
+                      typeof deposit.amount === 'number' || typeof deposit.amount === 'string'
+                        ? `${deposit.amount} ₽`
+                        : '—';
+
+                    const currencyText = deposit.currency || 'RUB';
+                    const dateText = formatRewardDateTime(deposit.created_at);
+
+                    return (
+                      <tr key={key}>
+                        <td>{amountText}</td>
+                        <td>{currencyText}</td>
+                        <td>{isTest ? 'Да' : 'Нет'}</td>
+                        <td>{dateText}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {myDepositsCount > 0 && (
+            <div className="profile-deposits-legacy-note">
+              <div className="profile-stat-caption">
+                Для обратной совместимости система также хранит агрегированную историю
+                депозитов, используемую в реферальной статистике: {myDepositsCount}{' '}
+                операций на сумму {myDepositsTotalAmount} ₽.
+              </div>
             </div>
           )}
         </section>
