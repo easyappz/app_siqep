@@ -35,3 +35,9 @@ export async function resetMemberPassword(memberId, data) {
   const response = await instance.post(`/api/admin/members/${memberId}/reset-password/`, payload);
   return response.data;
 }
+
+export async function adminDebitWallet(data) {
+  const payload = data && typeof data === 'object' ? data : {};
+  const response = await instance.post('/api/admin/wallet/debit/', payload);
+  return response.data;
+}

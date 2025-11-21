@@ -12,6 +12,7 @@ import AdminLayout from './components/Admin/Layout';
 import AdminOverviewPage from './components/Admin/Overview';
 import AdminUsersPage from './components/Admin/Users';
 import AdminReferralsPage from './components/Admin/Referrals';
+import AdminWalletPage from './components/Admin/Wallet';
 import PasswordResetPage from './components/Auth/PasswordReset';
 import { useAuth } from './context/AuthContext';
 
@@ -53,6 +54,7 @@ function App() {
         '/admin',
         '/admin/overview',
         '/admin/users',
+        '/admin/wallet',
         '/admin/referrals',
       ]);
     }
@@ -88,6 +90,7 @@ function App() {
               <Route index element={<Navigate to="overview" replace />} />
               <Route path="overview" element={<AdminOverviewPage />} />
               <Route path="users" element={<AdminUsersPage />} />
+              <Route path="wallet" element={<AdminWalletPage />} />
               <Route path="referrals" element={<AdminReferralsPage />} />
             </Route>
 

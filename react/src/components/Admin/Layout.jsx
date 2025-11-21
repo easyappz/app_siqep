@@ -41,6 +41,9 @@ const AdminLayout = () => {
             <NavLink to="/admin/users" className={getNavLinkClassName}>
               Пользователи
             </NavLink>
+            <NavLink to="/admin/wallet" className={getNavLinkClassName}>
+              Баланс пользователей
+            </NavLink>
             <NavLink to="/admin/referrals" className={getNavLinkClassName}>
               Рефералы
             </NavLink>
