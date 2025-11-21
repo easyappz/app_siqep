@@ -497,6 +497,33 @@ class RegistrationSerializer(serializers.Serializer):
 class LoginSerializer(serializers.Serializer):
     """Serializer used for login by phone and password."""
 
+    phone = serializers.CharField()
+    password = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        phone = (attrs.get("phone") or "").strip()
+        password = attrs.get("password") or ""
+
+        if not phone or not password:
+            raise serializers.ValidationError(
+                {"phone": "Неверный номер телефона или пароль."}
+            )
+
+        try:
+            member = Member.objects.get(phone=phone)
+        except Member.DoesNotExist:
+            raise serializers.ValidationError(
+                {"phone": "Неверный номер телефона или пароль."}
+            )
+
+        if not member.check_password(password):
+            raise serializers.ValidationError(
+                {"phone": "Неверный номер телефона или пароль."}
+            )
+
+        attrs["member"] = member
+        return attrs
+
 
 class ChangePasswordSerializer(serializers.Serializer):
     """Serializer used for changing password of the authenticated Member."""
@@ -531,4 +558,107 @@ class ChangePasswordSerializer(serializers.Serializer):
                 {"new_password": "Новый пароль не должен совпадать с текущим паролем."}
             )
 
+        return attrs
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    """Serializer for requesting a password reset code by phone or email.
+
+    It locates the Member by phone or email, creates a PasswordResetCode
+    with a limited lifetime, and returns that instance from save().
+    """
+
+    phone = serializers.CharField(required=False, allow_blank=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        phone = (attrs.get("phone") or "").strip()
+        email = (attrs.get("email") or "").strip()
+
+        if not phone and not email:
+            raise serializers.ValidationError(
+                "Укажите номер телефона или электронную почту для сброса пароля."
+            )
+
+        member = None
+
+        if phone:
+            try:
+                member = Member.objects.get(phone=phone)
+            except Member.DoesNotExist:
+                raise serializers.ValidationError(
+                    {"phone": "Пользователь с таким номером телефона не найден."}
+                )
+        elif email:
+            try:
+                member = Member.objects.get(email=email)
+            except Member.DoesNotExist:
+                raise serializers.ValidationError(
+                    {"email": "Пользователь с такой электронной почтой не найден."}
+                )
+
+        attrs["member"] = member
+        return attrs
+
+    def create(self, validated_data):
+        member = validated_data["member"]
+
+        # Mark previous active codes for this member as used
+        PasswordResetCode.objects.filter(member=member, is_used=False).update(
+            is_used=True
+        )
+
+        # Generate a secure numeric 6-digit code
+        code = "".join(str(secrets.randbelow(10)) for _ in range(6))
+
+        expires_at = timezone.now() + timedelta(minutes=15)
+
+        reset_code = PasswordResetCode.objects.create(
+            member=member,
+            code=code,
+            expires_at=expires_at,
+        )
+
+        return reset_code
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    """Serializer to validate a reset code and new password for password reset."""
+
+    code = serializers.CharField()
+    new_password = serializers.CharField(
+        write_only=True,
+        min_length=6,
+        error_messages={
+            "min_length": "Пароль должен содержать не менее 6 символов.",
+            "blank": "Укажите новый пароль.",
+        },
+    )
+
+    def validate(self, attrs):
+        code = (attrs.get("code") or "").strip()
+
+        if not code:
+            raise serializers.ValidationError(
+                {"code": "Укажите код для сброса пароля."}
+            )
+
+        now = timezone.now()
+        try:
+            reset_code = (
+                PasswordResetCode.objects.filter(
+                    code=code,
+                    is_used=False,
+                    expires_at__gt=now,
+                )
+                .select_related("member")
+                .latest("created_at")
+            )
+        except PasswordResetCode.DoesNotExist:
+            raise serializers.ValidationError(
+                {"code": "Неверный или просроченный код для сброса пароля."}
+            )
+
+        attrs["member"] = reset_code.member
+        attrs["reset_code"] = reset_code
         return attrs
