@@ -25,6 +25,7 @@ from .models import (
     ReferralEvent,
     WalletTransaction,
     ReferralBonus,
+    Deposit,
 )
 from .referral_utils import (
     get_rank_multiplier,
@@ -365,6 +366,166 @@ class WalletAPITests(TestCase):
 
         summary = client.get("/api/wallet/summary/", format="json").json()
         self.assertEqual(summary.get("balance"), "100.00")
+
+
+class ReferralDepositsAndBonusesAPITests(TestCase):
+    """Tests for referral deposits and bonuses API endpoints and profile stats aggregates."""
+
+    def setUp(self):
+        self.client = APIClient()
+
+        self.referrer = Member(
+            first_name="ReferrerApi",
+            last_name="User",
+            phone="+79990100000",
+            email=None,
+            is_influencer=True,
+            is_admin=False,
+            user_type=USER_TYPE_INFLUENCER,
+        )
+        self.referrer.set_password("referrer123")
+        self.referrer.save()
+
+        token = MemberAuthToken.create_for_member(self.referrer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+        # Two direct referrals
+        self.ref1 = Member(
+            first_name="Ref1",
+            last_name="User",
+            phone="+79990100001",
+            email=None,
+            is_influencer=False,
+            is_admin=False,
+            user_type=USER_TYPE_PLAYER,
+            referrer=self.referrer,
+            referred_by=self.referrer,
+        )
+        self.ref1.set_password("ref1pass")
+        self.ref1.save()
+
+        self.ref2 = Member(
+            first_name="Ref2",
+            last_name="User",
+            phone="+79990100002",
+            email=None,
+            is_influencer=False,
+            is_admin=False,
+            user_type=USER_TYPE_PLAYER,
+            referrer=self.referrer,
+            referred_by=self.referrer,
+        )
+        self.ref2.set_password("ref2pass")
+        self.ref2.save()
+
+        # A non-referral member (should not be visible in referral endpoints)
+        self.other = Member(
+            first_name="Other",
+            last_name="User",
+            phone="+79990100003",
+            email=None,
+            is_influencer=False,
+            is_admin=False,
+            user_type=USER_TYPE_PLAYER,
+        )
+        self.other.set_password("otherpass")
+        self.other.save()
+
+        # Create deposits for referrals (through Deposit model)
+        self.dep1 = Deposit.objects.create(
+            member=self.ref1,
+            amount=Decimal("300.00"),
+            currency="RUB",
+            is_test=False,
+        )
+        self.dep2 = Deposit.objects.create(
+            member=self.ref2,
+            amount=Decimal("200.00"),
+            currency="RUB",
+            is_test=False,
+        )
+
+        # Deposit for non-referral
+        self.dep_other = Deposit.objects.create(
+            member=self.other,
+            amount=Decimal("500.00"),
+            currency="RUB",
+            is_test=False,
+        )
+
+        # Ensure referrals have wallet balance to spend (Deposit post_save adds to wallet)
+        self.ref1.refresh_from_db()
+        self.ref2.refresh_from_db()
+
+        # Each referral spends some amount to trigger ReferralBonus
+        self.spend1_amount = Decimal("100.00")
+        self.spend2_amount = Decimal("50.00")
+
+        self.spend1_tx = self.ref1.spend(self.spend1_amount, description="Spend ref1")
+        self.spend2_tx = self.ref2.spend(self.spend2_amount, description="Spend ref2")
+
+    def test_referral_deposits_endpoint_returns_only_referrals_deposits(self):
+        url = "/api/referrals/deposits/"
+        response = self.client.get(url, format="json")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIsInstance(data, list)
+
+        deposit_ids = {item["id"] for item in data}
+        self.assertIn(self.dep1.id, deposit_ids)
+        self.assertIn(self.dep2.id, deposit_ids)
+        self.assertNotIn(self.dep_other.id, deposit_ids)
+
+        member_ids = {item["member"]["id"] for item in data}
+        self.assertEqual(member_ids, {self.ref1.id, self.ref2.id})
+
+    def test_referral_bonuses_endpoint_returns_bonuses_for_referrer(self):
+        url = "/api/referrals/bonuses/"
+        response = self.client.get(url, format="json")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIsInstance(data, list)
+        self.assertGreaterEqual(len(data), 2)
+
+        # Sum of bonuses should match 10% of spends
+        total_bonus_from_api = sum(Decimal(item["amount"]) for item in data)
+        expected_total = (
+            (self.spend1_amount + self.spend2_amount)
+            * INFLUENCER_DEPOSIT_PERCENT
+        ).quantize(Decimal("0.01"))
+        self.assertEqual(total_bonus_from_api, expected_total)
+
+        # Each bonus entry should reference a referred member
+        referred_ids = {item["referred_member"]["id"] for item in data}
+        self.assertEqual(referred_ids, {self.ref1.id, self.ref2.id})
+
+    def test_profile_stats_contains_referral_aggregates(self):
+        url = "/api/profile/stats/"
+        response = self.client.get(url, format="json")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        self.assertIn("referral_total_deposits_amount", data)
+        self.assertIn("referral_total_bonuses_amount", data)
+
+        # Deposits from referrals: 300 + 200 = 500
+        self.assertEqual(data["referral_total_deposits_amount"], 500)
+
+        # Bonuses from spends: floor to integer rubles
+        expected_bonus_total = int(
+            (
+                (self.spend1_amount + self.spend2_amount)
+                * INFLUENCER_DEPOSIT_PERCENT
+            ).quantize(Decimal("0.01"))
+        )
+        self.assertEqual(data["referral_total_bonuses_amount"], expected_bonus_total)
+
+    def test_referral_endpoints_require_authentication(self):
+        client = APIClient()
+        resp_deposits = client.get("/api/referrals/deposits/", format="json")
+        resp_bonuses = client.get("/api/referrals/bonuses/", format="json")
+        self.assertEqual(resp_deposits.status_code, 401)
+        self.assertEqual(resp_bonuses.status_code, 401)
 
 
 class RankedReferralLogicTests(TestCase):

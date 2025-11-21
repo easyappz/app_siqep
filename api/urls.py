@@ -15,6 +15,8 @@ from .views import (
     ProfileStatsView,
     ReferralTreeView,
     ReferralRewardsView,
+    ReferralDepositsView,
+    ReferralBonusesView,
     WithdrawalRequestListCreateView,
     AdminMemberListCreateView,
     AdminMemberDetailView,
@@ -72,6 +74,16 @@ urlpatterns = [
         "referrals/rewards/",
         ReferralRewardsView.as_view(),
         name="referral-rewards",
+    ),
+    path(
+        "referrals/deposits/",
+        ReferralDepositsView.as_view(),
+        name="referral-deposits",
+    ),
+    path(
+        "referrals/bonuses/",
+        ReferralBonusesView.as_view(),
+        name="referral-bonuses",
     ),
     path(
         "withdrawal-requests/",

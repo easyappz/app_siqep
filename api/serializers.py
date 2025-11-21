@@ -15,6 +15,7 @@ from .models import (
     WithdrawalRequest,
     PasswordResetCode,
     WalletTransaction,
+    ReferralBonus,
 )
 from .referral_utils import (
     on_new_user_registered,
@@ -48,6 +49,24 @@ class DepositSerializer(serializers.ModelSerializer):
         model = Deposit
         fields = [
             "id",
+            "amount",
+            "currency",
+            "is_test",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class ReferralDepositSerializer(serializers.ModelSerializer):
+    """Serializer for deposits made by referrals of the current member."""
+
+    member = MemberReferrerSerializer(read_only=True)
+
+    class Meta:
+        model = Deposit
+        fields = [
+            "id",
+            "member",
             "amount",
             "currency",
             "is_test",
@@ -150,6 +169,34 @@ class WalletSpendRequestSerializer(serializers.Serializer):
                 "Сумма списания должна быть положительным числом."
             )
         return value
+
+
+class ReferralBonusSerializer(serializers.ModelSerializer):
+    """Serializer for referral bonuses created on wallet spend events."""
+
+    referred_member = MemberReferrerSerializer(read_only=True)
+    spend_transaction_id = serializers.IntegerField(
+        source="spend_transaction_id",
+        read_only=True,
+    )
+    spend_amount = serializers.DecimalField(
+        source="spend_transaction.amount",
+        max_digits=12,
+        decimal_places=2,
+        read_only=True,
+    )
+
+    class Meta:
+        model = ReferralBonus
+        fields = [
+            "id",
+            "referred_member",
+            "amount",
+            "spend_transaction_id",
+            "spend_amount",
+            "created_at",
+        ]
+        read_only_fields = fields
 
 
 class MemberSerializer(serializers.ModelSerializer):
@@ -774,6 +821,8 @@ class ProfileStatsSerializer(serializers.Serializer):
     my_deposits_total_amount = serializers.IntegerField()
     my_deposits_count = serializers.IntegerField()
     my_deposits = PlayerDepositHistoryItemSerializer(many=True)
+    referral_total_deposits_amount = serializers.IntegerField()
+    referral_total_bonuses_amount = serializers.IntegerField()
 
 
 # ============================
@@ -1152,7 +1201,7 @@ class SimulateDemoDepositsRequestSerializer(serializers.Serializer):
 
 
 class SimulateDemoDepositsResponseSerializer(serializers.Serializer):
-    """Serializer for demo deposits simulation response (SimulateDemoDepositsResponse)."""
+    """Serializer for demo deposits simulation response (SimulateDemoDepospositsResponse)."""
 
     players = SimulateDemoDepositsPlayerSerializer(many=True)
     timur = SimulateDemoDepositsTimurSerializer()

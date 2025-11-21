@@ -202,7 +202,7 @@ paths:
         - name: type
           in: query
           required: false
-          description: 'Фильтр по типу транзакции кошелька (deposit, spend, withdraw, refund, adjustment).'
+          description: 'Фильтр по типу транзакции кошелька (deposit, spend, withdraw, refund, adjustment, bonus).'
           schema:
             type: string
             enum:
@@ -211,6 +211,7 @@ paths:
               - withdraw
               - refund
               - adjustment
+              - bonus
       responses:
         '200':
           description: 'Постраничный список операций кошелька.'
@@ -320,7 +321,7 @@ paths:
   /api/profile/stats/:
     get:
       operationId: profile_stats_retrieve
-      description: 'Получить статистику реферальной программы: количество рефералов, заработанные бонусы и деньги, история начислений, график регистраций и данные о собственных депозитах.'
+      description: 'Получить статистику реферальной программы: количество рефералов, заработанные бонусы и деньги, история начислений, график регистраций и данные о собственных депозитах, а также агрегированные суммы депозитов и бонусов рефералов.'
       tags:
         - profile
       security:
@@ -392,6 +393,44 @@ paths:
           description: Доступ запрещён
         '404':
           description: Пользователь не найден
+  /api/referrals/deposits/:
+    get:
+      operationId: referrals_deposits_list
+      description: 'Получить список депозитов, совершённых прямыми рефералами текущего пользователя.'
+      tags:
+        - referrals
+      security:
+        - MemberTokenAuth: []
+      responses:
+        '200':
+          description: 'Список депозитов рефералов.'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReferralDeposit'
+        '401':
+          description: Требуется аутентификация
+  /api/referrals/bonuses/:
+    get:
+      operationId: referrals_bonuses_list
+      description: 'Получить список бонусов, начисленных текущему пользователю за траты средств его рефералов из кошелька (ReferralBonus).' 
+      tags:
+        - referrals
+      security:
+        - MemberTokenAuth: []
+      responses:
+        '200':
+          description: 'Список бонусов за траты рефералов.'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReferralBonus'
+        '401':
+          description: Требуется аутентификация
   /api/admin/members/:
     get:
       operationId: admin_members_list
@@ -773,6 +812,71 @@ components:
         - amount
         - currency
         - is_test
+        - created_at
+    ReferralDeposit:
+      type: object
+      description: 'Депозит, совершённый рефералом текущего пользователя.'
+      properties:
+        id:
+          type: integer
+          description: 'Идентификатор депозита.'
+        member:
+          allOf:
+            - $ref: '#/components/schemas/MemberReferrer'
+          description: 'Реферал, который совершил депозит.'
+        amount:
+          type: string
+          format: decimal
+          description: 'Сумма депозита в рублях.'
+        currency:
+          type: string
+          description: 'Валюта депозита (по умолчанию RUB).'
+        is_test:
+          type: boolean
+          description: 'Является ли депозит тестовым (демонстрационным).'
+        created_at:
+          type: string
+          format: date-time
+          description: 'Дата и время создания депозита.'
+      required:
+        - id
+        - member
+        - amount
+        - currency
+        - is_test
+        - created_at
+    ReferralBonus:
+      type: object
+      description: 'Бонус, начисленный рефереру за трату средств рефералом из кошелька.'
+      properties:
+        id:
+          type: integer
+          description: 'Идентификатор бонуса.'
+        referred_member:
+          allOf:
+            - $ref: '#/components/schemas/MemberReferrer'
+          description: 'Реферал, совершивший трату средств.'
+        amount:
+          type: string
+          format: decimal
+          description: 'Сумма бонуса в рублях.'
+        spend_transaction_id:
+          type: integer
+          description: 'ID транзакции кошелька типа SPEND, по которой начислен бонус.'
+        spend_amount:
+          type: string
+          format: decimal
+          description: 'Сумма исходной траты средств из кошелька реферала.'
+        created_at:
+          type: string
+          format: date-time
+          description: 'Дата и время начисления бонуса.'
+      required:
+        - id
+        - referred_member
+        - amount
+        - spend_transaction_id
+        - spend_amount
         - created_at
     Member:
       type: object
@@ -1172,6 +1276,12 @@ components:
           description: 'История депозитов текущего пользователя.'
           items:
             $ref: '#/components/schemas/PlayerDepositHistoryItem'
+        referral_total_deposits_amount:
+          type: integer
+          description: 'Суммарная сумма депозитов (покупок фишек), совершённых рефералами пользователя, в рублях.'
+        referral_total_bonuses_amount:
+          type: integer
+          description: 'Суммарная сумма бонусов в рублях, начисленных пользователю за траты средств его рефералов из кошелька.'
       required:
         - total_referrals
         - active_referrals
@@ -1182,6 +1292,8 @@ components:
         - my_deposits_total_amount
         - my_deposits_count
         - my_deposits
+        - referral_total_deposits_amount
+        - referral_total_bonuses_amount
     ReferralNode:
       type: object
       description: 'Элемент дерева рефералов, основанный на связях ReferralRelation.'
@@ -1902,6 +2014,7 @@ components:
             - withdraw
             - refund
             - adjustment
+            - bonus
         amount:
           type: string
           format: decimal

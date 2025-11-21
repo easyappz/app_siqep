@@ -3,7 +3,7 @@ from datetime import timedelta, datetime
 from decimal import Decimal
 
 from django.utils import timezone
-from django.db.models import Count, Sum
+from django.db.models import Count, Sum, Q
 from django.db.models.functions import TruncDate
 from django.http import Http404
 from drf_spectacular.utils import extend_schema
@@ -22,6 +22,8 @@ from .models import (
     ReferralRelation,
     WithdrawalRequest,
     WalletTransaction,
+    Deposit,
+    ReferralBonus,
 )
 from .permissions import IsAdminMember
 from .referral_utils import process_member_deposit, simulate_demo_deposits_for_amir_alfira
@@ -52,6 +54,8 @@ from .serializers import (
     WalletSummarySerializer,
     WalletDepositRequestSerializer,
     WalletSpendRequestSerializer,
+    ReferralBonusSerializer,
+    ReferralDepositSerializer,
 )
 
 
@@ -395,8 +399,9 @@ class ProfileStatsView(APIView):
         responses={200: ProfileStatsSerializer},
         description=(
             "Получить статистику реферальной программы для текущего пользователя, "
-            "включая количество рефералов, бонусы, историю начислений, график регистраций "
-            "и информацию о собственных депозитах."
+            "включая количество рефералов, бонусы, историю начислений, график регистраций, "
+            "информацию о собственных депозитах и агрегированные показатели по депозитам "
+            "и бонусам его рефералов."
         ),
     )
     def get(self, request):
@@ -467,7 +472,7 @@ class ProfileStatsView(APIView):
             for item in date_counts
         ]
 
-        # Own deposits of the current member
+        # Own deposits of the current member (based on ReferralEvent analytics)
         my_deposits_qs = ReferralEvent.objects.filter(referred=member).order_by(
             "created_at"
         )
@@ -480,6 +485,25 @@ class ProfileStatsView(APIView):
             for ev in my_deposits_qs
         ]
 
+        # Aggregated deposits made by referrals of the current member
+        referral_deposits_qs = Deposit.objects.filter(
+            Q(member__referrer=member) | Q(member__referred_by=member)
+        )
+        referral_deposits_total = (
+            referral_deposits_qs.aggregate(total=Sum("amount"))["total"]
+            or Decimal("0.00")
+        )
+        referral_total_deposits_amount = int(referral_deposits_total)
+
+        # Aggregated referral bonuses earned from referrals' spend transactions
+        referral_bonuses_total = (
+            ReferralBonus.objects.filter(referrer=member).aggregate(
+                total=Sum("amount")
+            )["total"]
+            or Decimal("0.00")
+        )
+        referral_total_bonuses_amount = int(referral_bonuses_total)
+
         stats_data = {
             "total_referrals": total_referrals,
             "active_referrals": active_referrals,
@@ -490,6 +514,8 @@ class ProfileStatsView(APIView):
             "my_deposits_total_amount": my_deposits_total_amount,
             "my_deposits_count": my_deposits_count,
             "my_deposits": my_deposits,
+            "referral_total_deposits_amount": referral_total_deposits_amount,
+            "referral_total_bonuses_amount": referral_total_bonuses_amount,
         }
 
         serializer = ProfileStatsSerializer(stats_data)
@@ -631,6 +657,54 @@ class ReferralRewardsView(APIView):
             "summary": summary_serializer.data,
         }
         return Response(response_data, status=status.HTTP_200_OK)
+
+
+class ReferralDepositsView(APIView):
+    """Return deposits made by referrals of the current authenticated member."""
+
+    authentication_classes = [MemberTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        responses={200: ReferralDepositSerializer(many=True)},
+        description=(
+            "Получить список депозитов, совершённых пользователями, приглашёнными "
+            "текущим участником (его прямыми рефералами)."
+        ),
+    )
+    def get(self, request):
+        member: Member = request.user
+        deposits_qs = (
+            Deposit.objects.select_related("member")
+            .filter(Q(member__referrer=member) | Q(member__referred_by=member))
+            .order_by("-created_at")
+        )
+        serializer = ReferralDepositSerializer(deposits_qs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class ReferralBonusesView(APIView):
+    """Return referral bonuses earned from referrals' wallet spends."""
+
+    authentication_classes = [MemberTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        responses={200: ReferralBonusSerializer(many=True)},
+        description=(
+            "Получить список бонусов, начисленных текущему пользователю за траты "
+            "средств его рефералов из кошелька (ReferralBonus)."
+        ),
+    )
+    def get(self, request):
+        member: Member = request.user
+        bonuses_qs = (
+            ReferralBonus.objects.select_related("referred_member", "spend_transaction")
+            .filter(referrer=member)
+            .order_by("-created_at")
+        )
+        serializer = ReferralBonusSerializer(bonuses_qs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class WithdrawalRequestListCreateView(generics.ListCreateAPIView):
