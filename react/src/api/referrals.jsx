@@ -21,3 +21,8 @@ export async function getReferralDeposits() {
   const response = await instance.get('/api/referrals/deposits/');
   return response.data;
 }
+
+export async function getReferralRanks() {
+  const response = await instance.get('/api/referrals/ranks/');
+  return response.data;
+}

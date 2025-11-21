@@ -17,6 +17,7 @@ import {
   fetchReferralRewards,
   getReferralBonuses,
   getReferralDeposits,
+  getReferralRanks,
 } from '../../api/referrals';
 import { createWithdrawalRequest, getMyWithdrawalRequests } from '../../api/withdrawals';
 import { changePassword } from '../../api/auth';
@@ -63,38 +64,58 @@ function getRankLabel(rank) {
   return 'Стандарт';
 }
 
-function getPlayerRewardDescription(rankLabel, currentRankRule) {
-  const multiplier = currentRankRule
-    ? Number(currentRankRule.player_depth_bonus_multiplier || 1)
+function getSafeMultiplier(value, fallback = 1) {
+  const num = Number(value);
+  if (Number.isNaN(num) || !Number.isFinite(num) || num <= 0) {
+    return fallback;
+  }
+  return num;
+}
+
+function getPlayerRewardDescription(rankLabel, rankCode, rankRules, currentRankRuleFallback) {
+  const baseDepthBonus = 100;
+
+  const ruleFromList = Array.isArray(rankRules)
+    ? rankRules.find((rule) => rule && rule.rank === rankCode)
+    : null;
+
+  const effectiveRule = ruleFromList || currentRankRuleFallback || null;
+
+  const multiplier = effectiveRule
+    ? getSafeMultiplier(effectiveRule.player_depth_bonus_multiplier, 1)
     : 1;
 
-  const baseDepth = 100;
-  const depthBonus = baseDepth * multiplier;
-
+  const depthBonus = baseDepthBonus * multiplier;
   const depthBonusText = `${depthBonus} V-Coins`;
 
   return [
     `Ваш текущий ранг: ${rankLabel}.`,
-    'За каждого прямого реферала, который впервые приходит в клуб и играет первый платный турнир, вы получаете 1000 V-Coins (эквивалент стартового стека).',
-    `За рефералов на уровнях 2–10 вы получаете глубинный кэшбэк: ${depthBonusText} за первый турнир каждого игрока в цепочке (множитель относительно базовых 100 V-Coins зависит от ранга).`,
+    'За каждого прямого реферала (уровень 1), который впервые приходит в клуб и играет первый платный турнир, вы получаете 1000 V-Coins (эквивалент стартового стека).',
+    `За рефералов на уровнях 2–10 вы получаете глубинный кэшбэк: ${depthBonusText} за первый турнир каждого игрока в цепочке. Базовый размер глубинного бонуса — 100 V-Coins, а итоговая величина зависит от множителя ранга.`,
   ];
 }
 
-function getInfluencerRewardDescription(rankLabel, currentRankRule) {
-  const multiplier = currentRankRule
-    ? Number(currentRankRule.influencer_depth_bonus_multiplier || 1)
+function getInfluencerRewardDescription(rankLabel, rankCode, rankRules, currentRankRuleFallback) {
+  const baseDirectBonus = 500;
+  const baseDepthBonus = 50;
+
+  const ruleFromList = Array.isArray(rankRules)
+    ? rankRules.find((rule) => rule && rule.rank === rankCode)
+    : null;
+
+  const effectiveRule = ruleFromList || currentRankRuleFallback || null;
+
+  const multiplier = effectiveRule
+    ? getSafeMultiplier(effectiveRule.influencer_depth_bonus_multiplier, 1)
     : 1;
 
-  const baseDirect = 500;
-  const baseDepth = 50;
-  const depthBonus = baseDepth * multiplier;
-
+  const depthBonus = baseDepthBonus * multiplier;
   const depthBonusText = `${depthBonus} ₽`;
 
   return [
     `Ваш текущий ранг: ${rankLabel}.`,
-    `За прямого реферала (уровень 1) вы получаете ${baseDirect} ₽ за его первый турнир.`,
-    `За рефералов на уровнях 2–10 вы получаете глубинный кэшбэк: ${depthBonusText} за первый турнир каждого нового игрока в цепочке (множитель относительно базовых 50 ₽ зависит от ранга).`,
+    `За прямого реферала (уровень 1) вы получаете ${baseDirectBonus} ₽ за его первый турнир.`,
+    `За рефералов на уровнях 2–10 вы получаете глубинный кэшбэк: ${depthBonusText} за первый турнир каждого нового игрока в цепочке. Базовый размер глубинного бонуса — 50 ₽, а итоговая величина зависит от множителя ранга.`,
     'Дополнительно вы всегда получаете 10% со всех дальнейших депозитов каждого вашего прямого реферала на фишки, независимо от ранга.',
   ];
 }
@@ -174,6 +195,10 @@ const ProfilePage = () => {
   const [referralDeposits, setReferralDeposits] = useState([]);
   const [referralDepositsLoading, setReferralDepositsLoading] = useState(false);
   const [referralDepositsError, setReferralDepositsError] = useState('');
+
+  const [rankRules, setRankRules] = useState([]);
+  const [rankRulesLoading, setRankRulesLoading] = useState(false);
+  const [rankRulesError, setRankRulesError] = useState('');
 
   const handleCopyLink = async (link) => {
     if (!link) {
@@ -455,6 +480,31 @@ const ProfilePage = () => {
     [logout, navigate],
   );
 
+  const loadRankRules = useCallback(async () => {
+    setRankRulesLoading(true);
+    setRankRulesError('');
+
+    try {
+      const data = await getReferralRanks();
+      const list = Array.isArray(data) ? data : [];
+      setRankRules(list);
+    } catch (err) {
+      const statusCode = err && err.response ? err.response.status : null;
+
+      if (statusCode === 401) {
+        logout();
+        navigate('/login', { replace: true });
+        return;
+      }
+
+      setRankRulesError(
+        'Не удалось загрузить параметры рангов. Интерфейс будет работать в упрощённом режиме.',
+      );
+    } finally {
+      setRankRulesLoading(false);
+    }
+  }, [logout, navigate]);
+
   useEffect(() => {
     loadProfile();
     loadStats();
@@ -483,6 +533,10 @@ const ProfilePage = () => {
       window.clearInterval(intervalId);
     };
   }, [loadReferralBonuses, loadReferralDeposits]);
+
+  useEffect(() => {
+    loadRankRules();
+  }, [loadRankRules]);
 
   useEffect(() => {
     if (profileData) {
@@ -589,6 +643,9 @@ const ProfilePage = () => {
       ? stats.referral_total_bonuses_amount
       : 0;
 
+  const levelSummaryFromStats =
+    stats && Array.isArray(stats.level_summary) ? stats.level_summary : [];
+
   const rewardsSummary = rewardsData && rewardsData.summary ? rewardsData.summary : null;
 
   const totalStackCount =
@@ -676,6 +733,70 @@ const ProfilePage = () => {
 
   const totalReferralDepositsDisplay =
     referralTotalDepositsAmount || referralDepositsTotalCalculated;
+
+  const sortedRankRules = Array.isArray(rankRules)
+    ? [...rankRules].sort((a, b) => {
+        const aVal = getSafeMultiplier(a && a.required_referrals, 0);
+        const bVal = getSafeMultiplier(b && b.required_referrals, 0);
+        return aVal - bVal;
+      })
+    : [];
+
+  const currentRankRuleFromList = sortedRankRules.find((rule) => rule && rule.rank === rankCode) || null;
+
+  const levelSummaryFromTree = (() => {
+    if (!Array.isArray(treeData) || treeData.length === 0) {
+      return [];
+    }
+
+    const map = new Map();
+
+    treeData.forEach((node) => {
+      if (!node) {
+        return;
+      }
+
+      const levelRaw = node.level;
+      const level =
+        typeof levelRaw === 'number' && levelRaw > 0 ? levelRaw : 0;
+
+      if (!level) {
+        return;
+      }
+
+      const isActive = Boolean(node.is_active_referral || node.has_paid_first_bonus);
+
+      const existing = map.get(level) || {
+        level,
+        totalReferrals: 0,
+        activeReferrals: 0,
+      };
+
+      existing.totalReferrals += 1;
+      if (isActive) {
+        existing.activeReferrals += 1;
+      }
+
+      map.set(level, existing);
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.level - b.level);
+  })();
+
+  const rewardDescriptionLines =
+    backendUserType === 'influencer'
+      ? getInfluencerRewardDescription(
+          rankLabel,
+          rankCode,
+          sortedRankRules,
+          currentRankRule,
+        )
+      : getPlayerRewardDescription(
+          rankLabel,
+          rankCode,
+          sortedRankRules,
+          currentRankRule,
+        );
 
   const handleRetry = () => {
     loadProfile();
@@ -1072,11 +1193,6 @@ const ProfilePage = () => {
     }
     return 'Другая операция';
   };
-
-  const rewardDescriptionLines =
-    backendUserType === 'influencer'
-      ? getInfluencerRewardDescription(rankLabel, currentRankRule)
-      : getPlayerRewardDescription(rankLabel, currentRankRule);
 
   const handleChangePasswordSubmit = async (event) => {
     event.preventDefault();
@@ -1665,6 +1781,93 @@ const ProfilePage = () => {
               <li key={line}>{line}</li>
             ))}
           </ul>
+
+          {rankRulesLoading && !rankRulesError && (
+            <div className="profile-status-message">Загрузка параметров рангов...</div>
+          )}
+
+          {rankRulesError && (
+            <div className="profile-status-message profile-status-error">
+              {rankRulesError}
+            </div>
+          )}
+
+          {!rankRulesLoading && sortedRankRules.length > 0 && (
+            <div className="profile-rank-table-wrapper">
+              <h3 className="profile-section-subtitle">Все ранги и требования</h3>
+              <table className="profile-rank-table">
+                <thead>
+                  <tr>
+                    <th>Ранг</th>
+                    <th>Активные рефералы 1-го уровня</th>
+                    <th>Глубинный бонус для игроков</th>
+                    <th>Глубинный бонус для инфлюенсеров</th>
+                    <th>До следующего ранга</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedRankRules.map((rule, index) => {
+                    if (!rule) {
+                      return null;
+                    }
+
+                    const ruleRank = rule.rank || 'standard';
+                    const isCurrent = ruleRank === rankCode;
+
+                    const requiredReferrals = getSafeMultiplier(
+                      rule.required_referrals,
+                      0,
+                    );
+
+                    const playerMultiplier = getSafeMultiplier(
+                      rule.player_depth_bonus_multiplier,
+                      1,
+                    );
+                    const influencerMultiplier = getSafeMultiplier(
+                      rule.influencer_depth_bonus_multiplier,
+                      1,
+                    );
+
+                    const playerDepthBonus = 100 * playerMultiplier;
+                    const influencerDepthBonus = 50 * influencerMultiplier;
+
+                    const nextRule = sortedRankRules[index + 1] || null;
+
+                    let toNextText = 'Максимальный ранг';
+                    if (nextRule && nextRule.rank) {
+                      const nextRequired = getSafeMultiplier(
+                        nextRule.required_referrals,
+                        0,
+                      );
+                      const diff = nextRequired - activeDirectReferralsCount;
+                      if (diff <= 0) {
+                        toNextText = `Вы уже выполняете требование следующего ранга (${getRankLabel(
+                          nextRule.rank,
+                        )}).`;
+                      } else {
+                        toNextText = `Осталось ${diff} активных прямых рефералов до ранга ${getRankLabel(
+                          nextRule.rank,
+                        )}.`;
+                      }
+                    }
+
+                    return (
+                      <tr
+                        key={rule.rank || index}
+                        className={isCurrent ? 'profile-rank-row-current' : ''}
+                      >
+                        <td>{getRankLabel(ruleRank)}</td>
+                        <td>{requiredReferrals}</td>
+                        <td>{`${playerDepthBonus} V-Coins`}</td>
+                        <td>{`${influencerDepthBonus} ₽`}</td>
+                        <td>{toNextText}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
 
         {isInfluencerProfile && (
@@ -1682,9 +1885,8 @@ const ProfilePage = () => {
                   {`${displayedInfluencerEarnings} ₽`}
                 </div>
                 <div className="profile-stat-caption">
-                  Сюда входят бонусы за первые турниры и процент с депозитов ваших рефералов,
-                  включая демонстрационные депозиты (например, 2000 ₽ для игроков Амир и
-                  Альфира), если они были созданы в системе.
+                  Сюда входят бонусы за первые турниры и процент с депозитов ваших рефералов
+                  по всей структуре.
                 </div>
               </div>
             </div>
@@ -1972,8 +2174,6 @@ const ProfilePage = () => {
             <h2 className="profile-section-title">Депозиты</h2>
             <p className="profile-section-text">
               Здесь отображаются все зафиксированные депозиты на фишки для вашего профиля.
-              В демонстрационном режиме сюда также входят тестовые депозиты (например,
-              2000 ₽ для игроков Амир и Альфира).
             </p>
           </div>
 
@@ -1994,14 +2194,12 @@ const ProfilePage = () => {
                   <tr>
                     <th>Сумма</th>
                     <th>Валюта</th>
-                    <th>Тестовый</th>
                     <th>Дата</th>
                   </tr>
                 </thead>
                 <tbody>
                   {profileDeposits.map((deposit) => {
                     const key = deposit.id || deposit.created_at || deposit.amount;
-                    const isTest = Boolean(deposit.is_test);
 
                     const amountText =
                       typeof deposit.amount === 'number' || typeof deposit.amount === 'string'
@@ -2015,7 +2213,6 @@ const ProfilePage = () => {
                       <tr key={key}>
                         <td>{amountText}</td>
                         <td>{currencyText}</td>
-                        <td>{isTest ? 'Да' : 'Нет'}</td>
                         <td>{dateText}</td>
                       </tr>
                     );
@@ -2044,6 +2241,54 @@ const ProfilePage = () => {
               статуса активации каждого реферала.
             </p>
           </div>
+
+          {levelSummaryFromTree.length > 0 && (
+            <div className="profile-level-summary">
+              <h3 className="profile-section-subtitle">Сводка по уровням глубины</h3>
+              <table className="profile-level-summary-table">
+                <thead>
+                  <tr>
+                    <th>Уровень</th>
+                    <th>Всего рефералов</th>
+                    <th>Активных</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {levelSummaryFromTree.map((row) => (
+                    <tr key={row.level}>
+                      <td>{row.level}</td>
+                      <td>{row.totalReferrals}</td>
+                      <td>{row.activeReferrals}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {levelSummaryFromStats.length > 0 && levelSummaryFromTree.length === 0 && (
+            <div className="profile-level-summary">
+              <h3 className="profile-section-subtitle">Сводка по уровням глубины</h3>
+              <table className="profile-level-summary-table">
+                <thead>
+                  <tr>
+                    <th>Уровень</th>
+                    <th>Всего рефералов</th>
+                    <th>Активных</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {levelSummaryFromStats.map((row) => (
+                    <tr key={row.level}>
+                      <td>{row.level}</td>
+                      <td>{row.total_referrals}</td>
+                      <td>{row.active_referrals}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {isLoadingTree && (
             <div className="profile-tree-loading">Загрузка структуры...</div>
@@ -2365,7 +2610,6 @@ const ProfilePage = () => {
                       <th>Реферал</th>
                       <th>Сумма депозита</th>
                       <th>Валюта</th>
-                      <th>Тестовый</th>
                       <th>Дата</th>
                     </tr>
                   </thead>
@@ -2391,7 +2635,6 @@ const ProfilePage = () => {
                           : '—';
 
                       const currencyText = deposit.currency || 'RUB';
-                      const isTest = Boolean(deposit.is_test);
                       const dateText = formatRewardDateTime(deposit.created_at);
 
                       return (
@@ -2399,7 +2642,6 @@ const ProfilePage = () => {
                           <td>{referralDisplay}</td>
                           <td>{amountText}</td>
                           <td>{currencyText}</td>
-                          <td>{isTest ? 'Да' : 'Нет'}</td>
                           <td>{dateText}</td>
                         </tr>
                       );
