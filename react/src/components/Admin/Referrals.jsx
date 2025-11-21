@@ -167,7 +167,7 @@ const AdminReferralsPage = () => {
           payload.created_at = createdAtIso;
         }
       } catch (dateError) {
-        // Если дата некорректна, просто не отправляем поле created_at
+        // ignore invalid date
       }
     }
 
@@ -177,7 +177,6 @@ const AdminReferralsPage = () => {
       await createAdminReferralEvent(payload);
 
       setCreateSuccess('Реферальное событие успешно создано.');
-      setCreateReferredId('');
       setCreateDepositAmount('1000');
       setCreateDateTime('');
 
@@ -315,6 +314,7 @@ const AdminReferralsPage = () => {
     setMemberRewardsError('');
 
     if (found) {
+      setCreateReferredId(String(found.id));
       loadMemberTree(found.id);
       loadMemberRewards(found.id);
     }
@@ -365,7 +365,12 @@ const AdminReferralsPage = () => {
     ? memberRewardsData
     : [];
 
-  const currentUserType = member && member.user_type ? member.user_type : member && member.is_influencer ? 'influencer' : 'player';
+  const currentUserType =
+    member && member.user_type
+      ? member.user_type
+      : member && member.is_influencer
+      ? 'influencer'
+      : 'player';
   const currentRank = member && member.rank ? member.rank : 'standard';
   const currentRankRule = member && member.current_rank_rule ? member.current_rank_rule : null;
 
@@ -475,7 +480,8 @@ const AdminReferralsPage = () => {
                 min="1"
               />
               <p className="admin-form-help">
-                ID можно посмотреть в разделе «Пользователи».
+                Можно ввести ID вручную или выбрать пользователя ниже — тогда поле
+                заполнится автоматически.
               </p>
             </div>
 

@@ -15,7 +15,7 @@ instance.interceptors.response.use(
 
     if (hasResponse && status === 400 && isLoginRequest) {
       // Convert this specific axios rejection into a resolved response
-      // so the global interceptor in axios.js does not treat it as a crash.
+      // so any global handlers do not трактовать его как критическую ошибку.
       return Promise.resolve(error.response);
     }
 

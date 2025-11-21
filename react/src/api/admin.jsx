@@ -41,3 +41,15 @@ export async function adminDebitWallet(data) {
   const response = await instance.post('/api/admin/wallet/debit/', payload);
   return response.data;
 }
+
+export async function adminDepositWallet(data) {
+  const payload = data && typeof data === 'object' ? data : {};
+  const response = await instance.post('/api/admin/wallet/deposit/', payload);
+  return response.data;
+}
+
+export async function adminSpendWallet(data) {
+  const payload = data && typeof data === 'object' ? data : {};
+  const response = await instance.post('/api/admin/wallet/spend/', payload);
+  return response.data;
+}

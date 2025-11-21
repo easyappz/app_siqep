@@ -1,5 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { fetchAdminMembers, adminDebitWallet } from '../../api/admin';
+import {
+  fetchAdminMembers,
+  adminDebitWallet,
+  adminDepositWallet,
+  adminSpendWallet,
+} from '../../api/admin';
 
 const AdminWalletPage = () => {
   const [members, setMembers] = useState([]);
@@ -10,6 +15,20 @@ const AdminWalletPage = () => {
   const [error, setError] = useState('');
 
   const [activeMemberId, setActiveMemberId] = useState(null);
+
+  const [depositAmount, setDepositAmount] = useState('');
+  const [depositReason, setDepositReason] = useState('');
+  const [depositLoading, setDepositLoading] = useState(false);
+  const [depositError, setDepositError] = useState('');
+  const [depositSuccess, setDepositSuccess] = useState('');
+
+  const [spendAmount, setSpendAmount] = useState('');
+  const [spendDescription, setSpendDescription] = useState('');
+  const [spendCategory, setSpendCategory] = useState('');
+  const [spendLoading, setSpendLoading] = useState(false);
+  const [spendError, setSpendError] = useState('');
+  const [spendSuccess, setSpendSuccess] = useState('');
+
   const [debitAmount, setDebitAmount] = useState('');
   const [debitReason, setDebitReason] = useState('');
   const [debitLoading, setDebitLoading] = useState(false);
@@ -55,20 +74,243 @@ const AdminWalletPage = () => {
     }
   };
 
-  const openDebitForm = (memberId) => {
-    setActiveMemberId(memberId);
+  const resetAllOperationState = () => {
+    setDepositAmount('');
+    setDepositReason('');
+    setDepositError('');
+    setDepositSuccess('');
+
+    setSpendAmount('');
+    setSpendDescription('');
+    setSpendCategory('');
+    setSpendError('');
+    setSpendSuccess('');
+
     setDebitAmount('');
     setDebitReason('');
     setDebitError('');
     setDebitSuccess('');
   };
 
-  const closeDebitForm = () => {
+  const openOperationsPanel = (memberId) => {
+    setActiveMemberId(memberId);
+    resetAllOperationState();
+  };
+
+  const closeOperationsPanel = () => {
     setActiveMemberId(null);
-    setDebitAmount('');
-    setDebitReason('');
-    setDebitError('');
-    setDebitSuccess('');
+    resetAllOperationState();
+  };
+
+  const updateMemberBalanceFromTransaction = (memberId, tx) => {
+    if (!tx) {
+      return;
+    }
+
+    const balanceAfter =
+      typeof tx.balance_after === 'number' || typeof tx.balance_after === 'string'
+        ? String(tx.balance_after)
+        : null;
+
+    if (balanceAfter === null) {
+      return;
+    }
+
+    setMembers((prev) =>
+      prev.map((member) =>
+        member.id === memberId
+          ? {
+              ...member,
+              wallet_balance: balanceAfter,
+              cash_balance: balanceAfter,
+            }
+          : member,
+      ),
+    );
+  };
+
+  const parsePositiveAmount = (raw) => {
+    const trimmed = raw ? String(raw).trim() : '';
+    if (!trimmed) {
+      return { valid: false, value: null };
+    }
+    const normalized = trimmed.replace(',', '.');
+    const numeric = Number(normalized);
+    if (!numeric || Number.isNaN(numeric) || numeric <= 0) {
+      return { valid: false, value: null };
+    }
+    return { valid: true, value: normalized };
+  };
+
+  const extractErrorMessage = (error, defaultMessage) => {
+    const responseData = error && error.response && error.response.data ? error.response.data : null;
+    if (!responseData) {
+      return defaultMessage;
+    }
+
+    if (responseData.amount) {
+      const value = Array.isArray(responseData.amount)
+        ? responseData.amount[0]
+        : responseData.amount;
+      return String(value);
+    }
+    if (responseData.member_id) {
+      const value = Array.isArray(responseData.member_id)
+        ? responseData.member_id[0]
+        : responseData.member_id;
+      return String(value);
+    }
+    if (typeof responseData.detail === 'string') {
+      return responseData.detail;
+    }
+    if (typeof responseData.error === 'string') {
+      return responseData.error;
+    }
+    if (
+      Array.isArray(responseData.non_field_errors) &&
+      responseData.non_field_errors.length > 0 &&
+      typeof responseData.non_field_errors[0] === 'string'
+    ) {
+      return responseData.non_field_errors[0];
+    }
+
+    return defaultMessage;
+  };
+
+  const handleDepositSubmit = async (event) => {
+    event.preventDefault();
+
+    if (!activeMemberId) {
+      return;
+    }
+
+    setDepositError('');
+    setDepositSuccess('');
+
+    const parsed = parsePositiveAmount(depositAmount);
+    if (!parsed.valid) {
+      setDepositError('Сумма пополнения должна быть положительным числом.');
+      return;
+    }
+
+    setDepositLoading(true);
+
+    try {
+      const payload = {
+        member_id: activeMemberId,
+        amount: parsed.value,
+        reason: depositReason || null,
+      };
+
+      const tx = await adminDepositWallet(payload);
+
+      updateMemberBalanceFromTransaction(activeMemberId, tx);
+
+      const balanceAfter =
+        tx && (typeof tx.balance_after === 'number' || typeof tx.balance_after === 'string')
+          ? String(tx.balance_after)
+          : '';
+
+      const successText = balanceAfter
+        ? `Пополнение выполнено. Новый баланс: ${balanceAfter} ₽.`
+        : 'Пополнение выполнено.';
+
+      setDepositSuccess(successText);
+      setDepositError('');
+    } catch (err) {
+      console.error('Failed to deposit to wallet by admin', err);
+      const message = extractErrorMessage(
+        err,
+        'Не удалось пополнить кошелёк. Попробуйте ещё раз.',
+      );
+      setDepositError(message);
+      setDepositSuccess('');
+    } finally {
+      setDepositLoading(false);
+    }
+  };
+
+  const handleSpendSubmit = async (event) => {
+    event.preventDefault();
+
+    if (!activeMemberId) {
+      return;
+    }
+
+    setSpendError('');
+    setSpendSuccess('');
+
+    const parsed = parsePositiveAmount(spendAmount);
+    if (!parsed.valid) {
+      setSpendError('Сумма списания должна быть положительным числом.');
+      return;
+    }
+
+    if (!spendDescription || !spendDescription.trim()) {
+      setSpendError('Укажите описание операции (например, за какой турнир списание).');
+      return;
+    }
+
+    setSpendLoading(true);
+
+    try {
+      const payload = {
+        member_id: activeMemberId,
+        amount: parsed.value,
+        description: spendDescription,
+      };
+
+      if (spendCategory && spendCategory.trim()) {
+        payload.category = spendCategory.trim();
+      }
+
+      const tx = await adminSpendWallet(payload);
+
+      updateMemberBalanceFromTransaction(activeMemberId, tx);
+
+      const balanceAfter =
+        tx && (typeof tx.balance_after === 'number' || typeof tx.balance_after === 'string')
+          ? String(tx.balance_after)
+          : '';
+
+      const successText = balanceAfter
+        ? `Списание как игра выполнено. Новый баланс: ${balanceAfter} ₽.`
+        : 'Списание как игра выполнено.';
+
+      setSpendSuccess(successText);
+      setSpendError('');
+    } catch (err) {
+      console.error('Failed to spend from wallet by admin', err);
+
+      const responseData = err && err.response && err.response.data ? err.response.data : null;
+      let message = 'Не удалось выполнить списание. Попробуйте ещё раз.';
+
+      if (responseData) {
+        if (responseData.amount) {
+          const value = Array.isArray(responseData.amount)
+            ? responseData.amount[0]
+            : responseData.amount;
+          message = String(value);
+        } else if (typeof responseData.detail === 'string') {
+          message = responseData.detail;
+        } else if (typeof responseData.error === 'string') {
+          message = responseData.error;
+        }
+
+        const textToCheck = JSON.stringify(responseData).toLowerCase();
+        if (
+          textToCheck.includes('insufficient') ||
+          textToCheck.includes('недостаточно')
+        ) {
+          message = 'Недостаточно средств на кошельке пользователя.';
+        }
+      }
+
+      setSpendError(message);
+      setSpendSuccess('');
+    } finally {
+      setSpendLoading(false);
+    }
   };
 
   const handleDebitSubmit = async (event) => {
@@ -78,79 +320,45 @@ const AdminWalletPage = () => {
       return;
     }
 
-    const trimmedAmount = debitAmount ? String(debitAmount).trim() : '';
+    setDebitError('');
+    setDebitSuccess('');
 
-    if (!trimmedAmount) {
-      setDebitError('Введите сумму для списания.');
-      setDebitSuccess('');
-      return;
-    }
-
-    const numericAmount = Number(trimmedAmount.replace(',', '.'));
-
-    if (!numericAmount || numericAmount <= 0) {
+    const parsed = parsePositiveAmount(debitAmount);
+    if (!parsed.valid) {
       setDebitError('Сумма списания должна быть положительным числом.');
-      setDebitSuccess('');
       return;
     }
 
     setDebitLoading(true);
-    setDebitError('');
-    setDebitSuccess('');
 
     try {
       const payload = {
         member_id: activeMemberId,
-        amount: trimmedAmount,
+        amount: parsed.value,
         reason: debitReason || null,
       };
 
       const tx = await adminDebitWallet(payload);
 
-      const balanceAfter = tx && tx.balance_after ? String(tx.balance_after) : null;
+      updateMemberBalanceFromTransaction(activeMemberId, tx);
 
-      if (balanceAfter !== null) {
-        setMembers((prev) =>
-          prev.map((member) =>
-            member.id === activeMemberId
-              ? {
-                  ...member,
-                  wallet_balance: balanceAfter,
-                  cash_balance: balanceAfter,
-                }
-              : member
-          )
-        );
-      }
+      const balanceAfter =
+        tx && (typeof tx.balance_after === 'number' || typeof tx.balance_after === 'string')
+          ? String(tx.balance_after)
+          : '';
 
       const successText = balanceAfter
-        ? `Средства успешно списаны. Новый баланс: ${balanceAfter} ₽.`
-        : 'Средства успешно списаны.';
+        ? `Административное списание выполнено. Новый баланс: ${balanceAfter} ₽.`
+        : 'Административное списание выполнено.';
 
       setDebitSuccess(successText);
       setDebitError('');
     } catch (err) {
       console.error('Failed to debit wallet by admin', err);
-
-      const responseData = err && err.response && err.response.data ? err.response.data : null;
-      let message = 'Не удалось списать средства. Попробуйте ещё раз.';
-
-      if (responseData) {
-        if (responseData.amount) {
-          const value = Array.isArray(responseData.amount)
-            ? responseData.amount[0]
-            : responseData.amount;
-          message = String(value);
-        } else if (responseData.member_id) {
-          const value = Array.isArray(responseData.member_id)
-            ? responseData.member_id[0]
-            : responseData.member_id;
-          message = String(value);
-        } else if (typeof responseData.detail === 'string') {
-          message = responseData.detail;
-        }
-      }
-
+      const message = extractErrorMessage(
+        err,
+        'Не удалось выполнить административное списание. Попробуйте ещё раз.',
+      );
       setDebitError(message);
       setDebitSuccess('');
     } finally {
@@ -185,7 +393,8 @@ const AdminWalletPage = () => {
       <section className="card admin-section-header">
         <h2 className="section-title">Баланс пользователей</h2>
         <p className="section-subtitle">
-          Просмотр кошельков пользователей и ручное списание средств администратором.
+          Просмотр кошельков пользователей и ручные операции с балансом: пополнение,
+          списание как игровая трата и административные корректировки.
         </p>
       </section>
 
@@ -195,8 +404,9 @@ const AdminWalletPage = () => {
             <h3 className="admin-table-title">Список пользователей</h3>
             <p className="admin-table-subtitle">Всего пользователей: {count}</p>
             <p className="admin-table-helper">
-              При ручном списании учитывается текущий баланс кошелька пользователя. Если
-              средств недостаточно, операция будет отклонена сервером.
+              Пополнение и списание как игра участвуют в стандартной логике кошелька и
+              реферальных бонусов. Административное списание предназначено только для
+              ручных корректировок и не влияет на реферальные начисления.
             </p>
           </div>
         </div>
@@ -243,9 +453,9 @@ const AdminWalletPage = () => {
                         <button
                           type="button"
                           className="btn btn-secondary"
-                          onClick={() => openDebitForm(member.id)}
+                          onClick={() => openOperationsPanel(member.id)}
                         >
-                          Списать средства
+                          Операции с балансом
                         </button>
                       </td>
                     </tr>
@@ -253,66 +463,224 @@ const AdminWalletPage = () => {
                     {activeMemberId === member.id && (
                       <tr>
                         <td colSpan={7} className="admin-reset-row">
-                          <form
-                            className="admin-reset-panel admin-form-grid"
-                            onSubmit={handleDebitSubmit}
-                          >
-                            <div className="admin-form-row">
-                              <label className="admin-form-label" htmlFor={`debitAmount-${member.id}`}>
-                                Сумма списания
-                              </label>
-                              <input
-                                id={`debitAmount-${member.id}`}
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                className="admin-form-input"
-                                value={debitAmount}
-                                onChange={(event) => setDebitAmount(event.target.value)}
-                                placeholder="Введите сумму в рублях"
-                              />
+                          <div className="admin-reset-panel admin-form-grid admin-wallet-operations-panel">
+                            <div className="admin-wallet-operation-column">
+                              <h4 className="admin-form-title">Пополнение кошелька</h4>
+                              <p className="admin-form-subtitle">
+                                Пополнение баланса пользователя в рублях. Используется для
+                                ручного начисления средств.
+                              </p>
+                              <form onSubmit={handleDepositSubmit}>
+                                <div className="admin-form-row">
+                                  <label
+                                    className="admin-form-label"
+                                    htmlFor={`depositAmount-${member.id}`}
+                                  >
+                                    Сумма пополнения
+                                  </label>
+                                  <input
+                                    id={`depositAmount-${member.id}`}
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    className="admin-form-input"
+                                    value={depositAmount}
+                                    onChange={(event) => setDepositAmount(event.target.value)}
+                                    placeholder="Введите сумму в рублях"
+                                  />
+                                </div>
+
+                                <div className="admin-form-row">
+                                  <label
+                                    className="admin-form-label"
+                                    htmlFor={`depositReason-${member.id}`}
+                                  >
+                                    Комментарий (необязательно)
+                                  </label>
+                                  <input
+                                    id={`depositReason-${member.id}`}
+                                    type="text"
+                                    className="admin-form-input"
+                                    value={depositReason}
+                                    onChange={(event) => setDepositReason(event.target.value)}
+                                    placeholder="Например: бонусное начисление"
+                                  />
+                                </div>
+
+                                {depositError && (
+                                  <p className="admin-form-error">{depositError}</p>
+                                )}
+
+                                {depositSuccess && (
+                                  <p className="admin-form-success">{depositSuccess}</p>
+                                )}
+
+                                <div className="admin-form-actions">
+                                  <button
+                                    type="submit"
+                                    className="btn btn-primary"
+                                    disabled={depositLoading}
+                                  >
+                                    {depositLoading ? 'Пополнение...' : 'Пополнить'}
+                                  </button>
+                                </div>
+                              </form>
                             </div>
 
-                            <div className="admin-form-row">
-                              <label className="admin-form-label" htmlFor={`debitReason-${member.id}`}>
-                                Причина (необязательно)
-                              </label>
-                              <input
-                                id={`debitReason-${member.id}`}
-                                type="text"
-                                className="admin-form-input"
-                                value={debitReason}
-                                onChange={(event) => setDebitReason(event.target.value)}
-                                placeholder="Комментарий для истории операций"
-                              />
+                            <div className="admin-wallet-operation-column">
+                              <h4 className="admin-form-title">Списание как игра/трата</h4>
+                              <p className="admin-form-subtitle">
+                                Моделирует обычную трату игрока (турнир, сервис и т.п.). Такое
+                                списание участвует в реферальной логике и может создавать
+                                бонусы для рефереров.
+                              </p>
+                              <form onSubmit={handleSpendSubmit}>
+                                <div className="admin-form-row">
+                                  <label
+                                    className="admin-form-label"
+                                    htmlFor={`spendAmount-${member.id}`}
+                                  >
+                                    Сумма списания
+                                  </label>
+                                  <input
+                                    id={`spendAmount-${member.id}`}
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    className="admin-form-input"
+                                    value={spendAmount}
+                                    onChange={(event) => setSpendAmount(event.target.value)}
+                                    placeholder="Введите сумму в рублях"
+                                  />
+                                </div>
+
+                                <div className="admin-form-row">
+                                  <label
+                                    className="admin-form-label"
+                                    htmlFor={`spendDescription-${member.id}`}
+                                  >
+                                    Описание операции
+                                  </label>
+                                  <input
+                                    id={`spendDescription-${member.id}`}
+                                    type="text"
+                                    className="admin-form-input"
+                                    value={spendDescription}
+                                    onChange={(event) =>
+                                      setSpendDescription(event.target.value)
+                                    }
+                                    placeholder="Например: турнир, рейк, сервис"
+                                  />
+                                </div>
+
+                                <div className="admin-form-row">
+                                  <label
+                                    className="admin-form-label"
+                                    htmlFor={`spendCategory-${member.id}`}
+                                  >
+                                    Категория (необязательно)
+                                  </label>
+                                  <input
+                                    id={`spendCategory-${member.id}`}
+                                    type="text"
+                                    className="admin-form-input"
+                                    value={spendCategory}
+                                    onChange={(event) => setSpendCategory(event.target.value)}
+                                    placeholder="Например: игра, сервис"
+                                  />
+                                </div>
+
+                                {spendError && (
+                                  <p className="admin-form-error">{spendError}</p>
+                                )}
+
+                                {spendSuccess && (
+                                  <p className="admin-form-success">{spendSuccess}</p>
+                                )}
+
+                                <div className="admin-form-actions">
+                                  <button
+                                    type="submit"
+                                    className="btn btn-secondary"
+                                    disabled={spendLoading}
+                                  >
+                                    {spendLoading ? 'Списание...' : 'Списать как игру'}
+                                  </button>
+                                </div>
+                              </form>
                             </div>
 
-                            {debitError && (
-                              <p className="admin-form-error">{debitError}</p>
-                            )}
+                            <div className="admin-wallet-operation-column admin-wallet-operation-column-narrow">
+                              <h4 className="admin-form-title">Административное списание</h4>
+                              <p className="admin-form-subtitle">
+                                Используется для исправления ошибок и технических корректировок.
+                                Не участвует в реферальной логике.
+                              </p>
+                              <form onSubmit={handleDebitSubmit}>
+                                <div className="admin-form-row">
+                                  <label
+                                    className="admin-form-label"
+                                    htmlFor={`debitAmount-${member.id}`}
+                                  >
+                                    Сумма списания
+                                  </label>
+                                  <input
+                                    id={`debitAmount-${member.id}`}
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    className="admin-form-input"
+                                    value={debitAmount}
+                                    onChange={(event) => setDebitAmount(event.target.value)}
+                                    placeholder="Введите сумму в рублях"
+                                  />
+                                </div>
 
-                            {debitSuccess && (
-                              <p className="admin-form-success">{debitSuccess}</p>
-                            )}
+                                <div className="admin-form-row">
+                                  <label
+                                    className="admin-form-label"
+                                    htmlFor={`debitReason-${member.id}`}
+                                  >
+                                    Причина (необязательно)
+                                  </label>
+                                  <input
+                                    id={`debitReason-${member.id}`}
+                                    type="text"
+                                    className="admin-form-input"
+                                    value={debitReason}
+                                    onChange={(event) => setDebitReason(event.target.value)}
+                                    placeholder="Комментарий для истории операций"
+                                  />
+                                </div>
 
-                            <div className="admin-form-actions">
-                              <button
-                                type="button"
-                                className="btn btn-secondary"
-                                onClick={closeDebitForm}
-                                disabled={debitLoading}
-                              >
-                                Отмена
-                              </button>
-                              <button
-                                type="submit"
-                                className="btn btn-primary"
-                                disabled={debitLoading}
-                              >
-                                {debitLoading ? 'Списание...' : 'Списать средства'}
-                              </button>
+                                {debitError && (
+                                  <p className="admin-form-error">{debitError}</p>
+                                )}
+
+                                {debitSuccess && (
+                                  <p className="admin-form-success">{debitSuccess}</p>
+                                )}
+
+                                <div className="admin-form-actions admin-form-actions-row">
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline"
+                                    onClick={closeOperationsPanel}
+                                    disabled={debitLoading || spendLoading || depositLoading}
+                                  >
+                                    Закрыть
+                                  </button>
+                                  <button
+                                    type="submit"
+                                    className="btn btn-danger"
+                                    disabled={debitLoading}
+                                  >
+                                    {debitLoading ? 'Списание...' : 'Адм. списание'}
+                                  </button>
+                                </div>
+                              </form>
                             </div>
-                          </form>
+                          </div>
                         </td>
                       </tr>
                     )}

@@ -1,8 +1,7 @@
 import instance from './axios';
 
 // Interceptor that converts expected 400 errors for the register endpoint
-// into resolved responses, so the global interceptor in axios.js does not
-// treat them as crashes.
+// into resolved responses, so any global handlers do not трактовать их как сбой.
 instance.interceptors.response.use(
   (response) => {
     return response;
@@ -17,7 +16,7 @@ instance.interceptors.response.use(
 
     if (hasResponse && status === 400 && isRegisterRequest) {
       // Convert this specific axios rejection into a resolved response
-      // so the global interceptor in axios.js does not log it as a crash.
+      // so any global error toast is not shown для ожидаемых ошибок.
       return Promise.resolve(error.response);
     }
 
