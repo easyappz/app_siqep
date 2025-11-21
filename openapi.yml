@@ -321,7 +321,7 @@ paths:
   /api/profile/stats/:
     get:
       operationId: profile_stats_retrieve
-      description: 'Получить статистику реферальной программы: количество рефералов, заработанные бонусы и деньги, история начислений, график регистраций и данные о собственных депозитах, а также агрегированные суммы депозитов и бонусов рефералов.'
+      description: 'Получить статистику реферальной программы: количество рефералов, заработанные бонусы и деньги, история начислений, график регистраций и данные о собственных депозитах, а также агрегированные суммы депозитов и бонусов рефералов и сводку по уровням глубины.'
       tags:
         - profile
       security:
@@ -429,6 +429,25 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/ReferralBonus'
+        '401':
+          description: Требуется аутентификация
+  /api/referrals/ranks/:
+    get:
+      operationId: referrals_ranks_list
+      description: 'Получить список всех рангов реферальной программы с порогами активных рефералов и множителями глубинного вознаграждения.'
+      tags:
+        - referrals
+      security:
+        - MemberTokenAuth: []
+      responses:
+        '200':
+          description: 'Список правил рангов.'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReferralRankRule'
         '401':
           description: Требуется аутентификация
   /api/admin/members/:
@@ -716,6 +735,62 @@ paths:
                 $ref: '#/components/schemas/WalletTransaction'
         '400':
           description: 'Ошибка валидации данных (например, неположительная сумма или недостаточно средств на балансе пользователя).'
+        '401':
+          description: 'Требуется аутентификация.'
+        '403':
+          description: 'Доступ запрещён (недостаточно прав администратора).'
+  /api/admin/wallet/deposit/:
+    post:
+      operationId: admin_wallet_deposit_create
+      summary: 'Админ-панель: Пополнение баланса пользователя'
+      description: 'Администратор вручную пополняет кошелёк пользователя. Создаётся транзакция WalletTransaction с типом deposit и пометкой источника admin_deposit.'
+      tags:
+        - admin
+      security:
+        - MemberTokenAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminWalletDepositRequest'
+      responses:
+        '201':
+          description: 'Операция пополнения успешно создана.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletTransaction'
+        '400':
+          description: 'Ошибка валидации данных (например, неположительная сумма).'
+        '401':
+          description: 'Требуется аутентификация.'
+        '403':
+          description: 'Доступ запрещён (недостаточно прав администратора).'
+  /api/admin/wallet/spend/:
+    post:
+      operationId: admin_wallet_spend_create
+      summary: 'Админ-панель: Симуляция списания средств с баланса пользователя'
+      description: 'Администратор моделирует списание средств с кошелька пользователя. Такое списание создаёт транзакцию типа spend и запускает стандартную логику реферальных бонусов.'
+      tags:
+        - admin
+      security:
+        - MemberTokenAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminWalletSpendRequest'
+      responses:
+        '201':
+          description: 'Операция списания успешно создана.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletTransaction'
+        '400':
+          description: 'Ошибка валидации данных (например, неположительная сумма или недостаточно средств на кошельке пользователя).'
         '401':
           description: 'Требуется аутентификация.'
         '403':
@@ -1011,6 +1086,34 @@ components:
         - required_referrals
         - player_depth_bonus_multiplier
         - influencer_depth_bonus_multiplier
+    ReferralRankRule:
+      type: object
+      description: 'Полное правило ранга реферальной программы.'
+      properties:
+        rank:
+          type: string
+          description: 'Идентификатор ранга.'
+          enum:
+            - standard
+            - silver
+            - gold
+            - platinum
+        required_referrals:
+          type: integer
+          description: 'Количество активных рефералов 1-го уровня, необходимых для достижения ранга.'
+        player_depth_bonus_multiplier:
+          type: string
+          format: decimal
+          description: 'Множитель глубинного кэшбэка для игроков (V-Coins) для данного ранга.'
+        influencer_depth_bonus_multiplier:
+          type: string
+          format: decimal
+          description: 'Множитель глубинного кэшбэка для инфлюенсеров (рубли) для данного ранга.'
+      required:
+        - rank
+        - required_referrals
+        - player_depth_bonus_multiplier
+        - influencer_depth_bonus_multiplier
     RegistrationRequest:
       type: object
       description: 'Данные для регистрации нового пользователя.'
@@ -1036,7 +1139,7 @@ components:
         referral_code:
           type: string
           nullable: true
-          description: 'Реферальный код пригласившего пользователя (необязательно). Если указан несуществующий или устаревший код, он будет проигнорирован, а регистрация пройдёт без привязки к рефереру.'
+          description: 'Реферальный код пригласившего пользователя (необязательно).'
       required:
         - first_name
         - last_name
@@ -1106,4 +1209,795 @@ components:
         - detail
     PasswordResetRequestRequest:
       type: object
-      description: 'Данные для запроса одноразового код
+      description: 'Данные для запроса одноразового кода сброса пароля.'
+      properties:
+        email:
+          type: string
+          format: email
+          nullable: true
+          description: 'Электронная почта пользователя (можно не указывать, если задан телефон).'
+        phone:
+          type: string
+          nullable: true
+          description: 'Номер телефона пользователя (можно не указывать, если задан email).'
+      required: []
+    PasswordResetRequestResponse:
+      type: object
+      description: 'Ответ при успешном запросе кода сброса пароля.'
+      properties:
+        detail:
+          type: string
+          description: 'Текстовое сообщение о том, что код для смены пароля отправлен.'
+        dev_code:
+          type: string
+          description: 'Только для окружения разработки: одноразовый код сброса пароля.'
+      required:
+        - detail
+        - dev_code
+    PasswordResetConfirmRequest:
+      type: object
+      description: 'Данные для подтверждения кода сброса и установки нового пароля.'
+      properties:
+        email:
+          type: string
+          format: email
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        code:
+          type: string
+          description: 'Одноразовый код сброса пароля.'
+        new_password:
+          type: string
+          format: password
+          description: 'Новый пароль (минимум 6 символов).'
+      required:
+        - code
+        - new_password
+    PasswordResetConfirmResponse:
+      type: object
+      description: 'Ответ при успешном сбросе пароля.'
+      properties:
+        detail:
+          type: string
+          description: 'Сообщение об успешном сбросе пароля.'
+      required:
+        - detail
+    ReferralHistoryItem:
+      type: object
+      description: 'Элемент истории начислений по реферальной программе.'
+      properties:
+        date:
+          type: string
+          format: date
+        referred_name:
+          type: string
+        bonus_amount:
+          type: integer
+        money_amount:
+          type: integer
+      required:
+        - date
+        - referred_name
+        - bonus_amount
+        - money_amount
+    RegistrationsChartPoint:
+      type: object
+      description: 'Точка на графике регистраций по дням.'
+      properties:
+        date:
+          type: string
+          format: date
+        count:
+          type: integer
+      required:
+        - date
+        - count
+    PlayerDepositHistoryItem:
+      type: object
+      description: 'Элемент истории собственных депозитов игрока.'
+      properties:
+        date:
+          type: string
+          format: date
+        amount:
+          type: integer
+      required:
+        - date
+        - amount
+    LevelSummaryItem:
+      type: object
+      description: 'Сводка по уровню глубины: всего и активных рефералов.'
+      properties:
+        level:
+          type: integer
+          description: 'Уровень глубины (1 — прямые рефералы).'
+        total_referrals:
+          type: integer
+          description: 'Общее количество рефералов на этом уровне.'
+        active_referrals:
+          type: integer
+          description: 'Количество активных рефералов на этом уровне (has_paid_first_bonus=true).'
+      required:
+        - level
+        - total_referrals
+        - active_referrals
+    ProfileStats:
+      type: object
+      description: 'Статистика реферальной программы для профиля пользователя.'
+      properties:
+        total_referrals:
+          type: integer
+        active_referrals:
+          type: integer
+        total_bonus_points:
+          type: integer
+        total_money_earned:
+          type: integer
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReferralHistoryItem'
+        registrations_chart:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistrationsChartPoint'
+        my_deposits_total_amount:
+          type: integer
+        my_deposits_count:
+          type: integer
+        my_deposits:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlayerDepositHistoryItem'
+        referral_total_deposits_amount:
+          type: integer
+        referral_total_bonuses_amount:
+          type: integer
+        level_summary:
+          type: array
+          description: 'Сводка по уровням глубины: всего и активных рефералов на каждом уровне.'
+          items:
+            $ref: '#/components/schemas/LevelSummaryItem'
+      required:
+        - total_referrals
+        - active_referrals
+        - total_bonus_points
+        - total_money_earned
+        - history
+        - registrations_chart
+        - my_deposits_total_amount
+        - my_deposits_count
+        - my_deposits
+        - referral_total_deposits_amount
+        - referral_total_bonuses_amount
+        - level_summary
+    ReferralNode:
+      type: object
+      description: 'Элемент дерева рефералов.'
+      properties:
+        descendant_id:
+          type: integer
+        level:
+          type: integer
+        has_paid_first_bonus:
+          type: boolean
+        username:
+          type: string
+        user_type:
+          type: string
+          enum:
+            - player
+            - influencer
+        rank:
+          type: string
+          enum:
+            - standard
+            - silver
+            - gold
+            - platinum
+        is_active_referral:
+          type: boolean
+      required:
+        - descendant_id
+        - level
+        - has_paid_first_bonus
+        - username
+        - user_type
+        - rank
+        - is_active_referral
+    ReferralReward:
+      type: object
+      description: 'Запись о начисленном реферальном вознаграждении.'
+      properties:
+        id:
+          type: integer
+        reward_type:
+          type: string
+        amount_rub:
+          type: string
+          format: decimal
+        stack_count:
+          type: integer
+        depth:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        source_member:
+          type: integer
+        source_member_name:
+          type: string
+      required:
+        - id
+        - reward_type
+        - amount_rub
+        - stack_count
+        - depth
+        - created_at
+        - source_member
+        - source_member_name
+    ReferralRewardsSummary:
+      type: object
+      description: 'Сводные данные по реферальным вознаграждениям.'
+      properties:
+        total_stack_count:
+          type: integer
+        total_influencer_amount:
+          type: string
+          format: decimal
+        total_first_tournament_amount:
+          type: string
+          format: decimal
+        total_deposit_percent_amount:
+          type: string
+          format: decimal
+      required:
+        - total_stack_count
+        - total_influencer_amount
+        - total_first_tournament_amount
+        - total_deposit_percent_amount
+    ReferralRewardsResponse:
+      type: object
+      description: 'Ответ с детализацией реферальных вознаграждений и агрегированной сводкой.'
+      properties:
+        rewards:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReferralReward'
+        summary:
+          $ref: '#/components/schemas/ReferralRewardsSummary'
+      required:
+        - rewards
+        - summary
+    AdminMember:
+      type: object
+      description: 'Пользователь для отображения и управления в админ-панели.'
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+          format: email
+          nullable: true
+        is_influencer:
+          type: boolean
+        is_admin:
+          type: boolean
+        referral_code:
+          type: string
+          readOnly: true
+        referred_by:
+          allOf:
+            - $ref: '#/components/schemas/MemberReferrer'
+          nullable: true
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        total_referrals:
+          type: integer
+          readOnly: true
+        total_bonus_points:
+          type: integer
+          readOnly: true
+        total_money_earned:
+          type: integer
+          readOnly: true
+      required:
+        - id
+        - first_name
+        - last_name
+        - phone
+        - is_influencer
+        - is_admin
+        - referral_code
+        - created_at
+        - total_referrals
+        - total_bonus_points
+        - total_money_earned
+    AdminMemberCreateRequest:
+      type: object
+      description: 'Данные для создания пользователя через админ-панель.'
+      properties:
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+          format: email
+          nullable: true
+        password:
+          type: string
+          format: password
+        is_influencer:
+          type: boolean
+        is_admin:
+          type: boolean
+      required:
+        - first_name
+        - last_name
+        - phone
+        - password
+    AdminResetMemberPasswordRequest:
+      type: object
+      description: 'Данные для админского сброса пароля пользователя.'
+      properties:
+        new_password:
+          type: string
+          format: password
+          nullable: true
+      required: []
+    AdminResetMemberPasswordResponse:
+      type: object
+      description: 'Ответ при успешном админском сбросе пароля пользователя.'
+      properties:
+        detail:
+          type: string
+        generated_password:
+          type: string
+      required:
+        - detail
+        - generated_password
+    AdminCreateReferralEventRequest:
+      type: object
+      description: 'Данные для создания реферального события (депозита) через админ-панель.'
+      properties:
+        referred_id:
+          type: integer
+        deposit_amount:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - referred_id
+        - deposit_amount
+    ReferralEventAdmin:
+      type: object
+      description: 'Реферальное событие для отображения в админ-панели.'
+      properties:
+        id:
+          type: integer
+        referrer:
+          type: object
+          properties:
+            id:
+              type: integer
+            first_name:
+              type: string
+            last_name:
+              type: string
+            is_influencer:
+              type: boolean
+          required:
+            - id
+            - first_name
+            - last_name
+            - is_influencer
+        referred:
+          type: object
+          properties:
+            id:
+              type: integer
+            first_name:
+              type: string
+            last_name:
+              type: string
+          required:
+            - id
+            - first_name
+            - last_name
+        bonus_amount:
+          type: integer
+        money_amount:
+          type: integer
+        deposit_amount:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        referrer_is_influencer:
+          type: boolean
+      required:
+        - id
+        - referrer
+        - referred
+        - bonus_amount
+        - money_amount
+        - deposit_amount
+        - created_at
+        - referrer_is_influencer
+    AdminStatsRegistrationsByDayItem:
+      type: object
+      description: 'Количество регистраций по дням для админ-панели.'
+      properties:
+        date:
+          type: string
+          format: date
+        count:
+          type: integer
+      required:
+        - date
+        - count
+    AdminStatsTopReferrerItem:
+      type: object
+      description: 'Элемент списка «Топ рефереров» для админ-панели.'
+      properties:
+        id:
+          type: integer
+        first_name:
+          type: string
+        last_name:
+          type: string
+        is_influencer:
+          type: boolean
+        total_referrals:
+          type: integer
+        total_bonus_points:
+          type: integer
+        total_money_earned:
+          type: integer
+      required:
+        - id
+        - first_name
+        - last_name
+        - is_influencer
+        - total_referrals
+        - total_bonus_points
+        - total_money_earned
+    AdminStatsIncomeBySource:
+      type: object
+      description: 'Доход по источникам для админ-панели.'
+      properties:
+        total_income:
+          type: integer
+        income_from_influencers:
+          type: integer
+        income_from_regular_users:
+          type: integer
+      required:
+        - total_income
+        - income_from_influencers
+        - income_from_regular_users
+    AdminStatsOverview:
+      type: object
+      description: 'Общая статистика для админ-панели.'
+      properties:
+        registrations_by_day:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminStatsRegistrationsByDayItem'
+        top_referrers:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminStatsTopReferrerItem'
+        income_by_source:
+          $ref: '#/components/schemas/AdminStatsIncomeBySource'
+      required:
+        - registrations_by_day
+        - top_referrers
+        - income_by_source
+    AdminWalletDebitRequest:
+      type: object
+      description: 'Данные для админского списания средств с кошелька пользователя.'
+      properties:
+        member_id:
+          type: integer
+          description: 'ID пользователя, с кошелька которого нужно списать средства.'
+        amount:
+          type: string
+          format: decimal
+          description: 'Сумма списания в рублях.'
+        reason:
+          type: string
+          nullable: true
+          description: 'Необязательное описание причины списания.'
+      required:
+        - member_id
+        - amount
+    AdminWalletDepositRequest:
+      type: object
+      description: 'Данные для админского пополнения кошелька пользователя.'
+      properties:
+        member_id:
+          type: integer
+          description: 'ID пользователя, чей кошелёк нужно пополнить.'
+        amount:
+          type: string
+          format: decimal
+          description: 'Сумма пополнения в рублях. Должна быть положительной.'
+        reason:
+          type: string
+          nullable: true
+          description: 'Необязательное текстовое описание причины пополнения.'
+      required:
+        - member_id
+        - amount
+    AdminWalletSpendRequest:
+      type: object
+      description: 'Данные для админской симуляции списания средств с кошелька пользователя.'
+      properties:
+        member_id:
+          type: integer
+          description: 'ID пользователя, с кошелька которого моделируется списание.'
+        amount:
+          type: string
+          format: decimal
+          description: 'Сумма списания в рублях. Должна быть положительной.'
+        description:
+          type: string
+          nullable: true
+          description: 'Необязательное описание операции (например, за что было списание).'
+        category:
+          type: string
+          nullable: true
+          description: 'Необязательная категория списания (игра, клуб и т.п.).'
+      required:
+        - member_id
+        - amount
+    PaginatedAdminMemberList:
+      type: object
+      description: 'Страница списка пользователей для админ-панели.'
+      properties:
+        count:
+          type: integer
+        next:
+          type: string
+          format: uri
+          nullable: true
+        previous:
+          type: string
+          format: uri
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminMember'
+      required:
+        - count
+        - results
+    PaginatedReferralEventAdminList:
+      type: object
+      description: 'Страница списка реферальных событий для админ-панели.'
+      properties:
+        count:
+          type: integer
+        next:
+          type: string
+          format: uri
+          nullable: true
+        previous:
+          type: string
+          format: uri
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReferralEventAdmin'
+      required:
+        - count
+        - results
+    MeUpdateRequest:
+      type: object
+      description: 'Данные для обновления профиля текущего пользователя и реквизитов вывода.'
+      properties:
+        first_name:
+          type: string
+        last_name:
+          type: string
+        email:
+          type: string
+          format: email
+          nullable: true
+        withdrawal_bank_details:
+          type: string
+          nullable: true
+        withdrawal_crypto_wallet:
+          type: string
+          nullable: true
+      required: []
+    WithdrawalRequest:
+      type: object
+      description: 'Заявка пользователя на вывод средств.'
+      properties:
+        id:
+          type: integer
+        amount:
+          type: string
+          format: decimal
+        method:
+          type: string
+          enum:
+            - card
+            - crypto
+        destination:
+          type: string
+        status:
+          type: string
+          enum:
+            - pending
+            - approved
+            - rejected
+            - paid
+        created_at:
+          type: string
+          format: date-time
+        processed_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - id
+        - amount
+        - method
+        - destination
+        - status
+        - created_at
+    WithdrawalRequestCreateRequest:
+      type: object
+      description: 'Данные для создания заявки на вывод средств.'
+      properties:
+        amount:
+          type: string
+          format: decimal
+        method:
+          type: string
+          enum:
+            - card
+            - crypto
+        destination:
+          type: string
+      required:
+        - amount
+        - method
+        - destination
+    WalletTransaction:
+      type: object
+      description: 'Запись операции кошелька пользователя.'
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum:
+            - deposit
+            - spend
+            - withdraw
+            - refund
+            - adjustment
+            - admin_debit
+            - bonus
+        amount:
+          type: string
+          format: decimal
+        balance_after:
+          type: string
+          format: decimal
+        description:
+          type: string
+          nullable: true
+        meta:
+          type: object
+          nullable: true
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - type
+        - amount
+        - balance_after
+        - created_at
+    WalletSummary:
+      type: object
+      description: 'Сводная информация по кошельку пользователя.'
+      properties:
+        balance:
+          type: string
+          format: decimal
+        total_deposited:
+          type: string
+          format: decimal
+        total_spent:
+          type: string
+          format: decimal
+      required:
+        - balance
+        - total_deposited
+        - total_spent
+    WalletDepositRequest:
+      type: object
+      description: 'Данные для внутреннего пополнения кошелька.'
+      properties:
+        amount:
+          type: string
+          format: decimal
+        description:
+          type: string
+          nullable: true
+      required:
+        - amount
+    WalletSpendRequest:
+      type: object
+      description: 'Данные для списания средств из кошелька.'
+      properties:
+        amount:
+          type: string
+          format: decimal
+        description:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+      required:
+        - amount
+    PaginatedWalletTransactionList:
+      type: object
+      description: 'Страница списка операций кошелька.'
+      properties:
+        count:
+          type: integer
+        next:
+          type: string
+          format: uri
+          nullable: true
+        previous:
+          type: string
+          format: uri
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/WalletTransaction'
+      required:
+        - count
+        - results
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid
+    MemberTokenAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: 'Используйте формат: `Token <ключ>` для аутентификации пользователя.'

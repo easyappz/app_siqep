@@ -24,6 +24,7 @@ from .models import (
     WalletTransaction,
     Deposit,
     ReferralBonus,
+    RankRule,
 )
 from .permissions import IsAdminMember
 from .serializers import (
@@ -53,6 +54,9 @@ from .serializers import (
     ReferralBonusSerializer,
     ReferralDepositSerializer,
     WalletAdminDebitSerializer,
+    WalletAdminDepositSerializer,
+    WalletAdminSpendSerializer,
+    RankRuleSerializer,
 )
 
 
@@ -161,9 +165,6 @@ class PasswordResetRequestView(APIView):
 
         reset_code = serializer.save()
 
-        # NOTE: In development environment we return the code in response
-        # to simplify manual testing. In production this code should be
-        # delivered via email/SMS and not returned in the API response.
         return Response(
             {
                 "detail": "Код для смены пароля отправлен.",
@@ -412,6 +413,59 @@ class WalletAdminDebitView(APIView):
         return Response(output.data, status=status.HTTP_201_CREATED)
 
 
+class WalletAdminDepositView(APIView):
+    """Admin-only endpoint to deposit funds to a member's wallet."""
+
+    authentication_classes = [MemberTokenAuthentication]
+    permission_classes = [IsAuthenticated, IsAdminMember]
+
+    @extend_schema(
+        request=WalletAdminDepositSerializer,
+        responses={201: WalletTransactionSerializer},
+        description=(
+            "Администратор вручную пополняет кошелёк пользователя. "
+            "Создаётся транзакция WalletTransaction с типом deposit и пометкой источника admin_deposit."
+        ),
+    )
+    def post(self, request):
+        serializer = WalletAdminDepositSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        tx = serializer.save()
+        output = WalletTransactionSerializer(tx)
+        return Response(output.data, status=status.HTTP_201_CREATED)
+
+
+class WalletAdminSpendView(APIView):
+    """Admin-only endpoint to simulate a spend from a member's wallet.
+
+    Such spends participate in referral bonus logic the same way as regular player spends.
+    """
+
+    authentication_classes = [MemberTokenAuthentication]
+    permission_classes = [IsAuthenticated, IsAdminMember]
+
+    @extend_schema(
+        request=WalletAdminSpendSerializer,
+        responses={201: WalletTransactionSerializer},
+        description=(
+            "Администратор моделирует списание средств с кошелька пользователя. "
+            "Списание создаёт транзакцию типа spend и запускает логику реферальных бонусов, как обычная трата игрока."
+        ),
+    )
+    def post(self, request):
+        serializer = WalletAdminSpendSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        tx = serializer.save()
+        output = WalletTransactionSerializer(tx)
+        return Response(output.data, status=status.HTTP_201_CREATED)
+
+
 class ProfileStatsView(APIView):
     """Return referral statistics for the current member."""
 
@@ -423,25 +477,22 @@ class ProfileStatsView(APIView):
         description=(
             "Получить статистику реферальной программы для текущего пользователя, "
             "включая количество рефералов, бонусы, историю начислений, график регистраций, "
-            "информацию о собственных депозитах и агрегированные показатели по депозитам "
-            "и бонусам его рефералов."
+            "информацию о собственных депозитах, агрегированные показатели по депозитам "
+            "и бонусам его рефералов, а также сводку по уровням глубины."
         ),
     )
     def get(self, request):
         member: Member = request.user
 
-        # Referral events where the current member is the referrer
         events_qs = ReferralEvent.objects.filter(referrer=member).select_related(
             "referred"
         )
 
         total_referrals = events_qs.count()
 
-        # active_referrals: referrals created within the last 30 days
         thirty_days_ago = timezone.now() - timedelta(days=30)
         active_referrals = events_qs.filter(created_at__gte=thirty_days_ago).count()
 
-        # Aggregate rewards from ReferralReward for this member
         rewards = list(ReferralReward.objects.filter(member=member))
 
         total_bonus_points = sum(
@@ -468,7 +519,6 @@ class ProfileStatsView(APIView):
 
         total_money_earned = int(total_influencer_amount)
 
-        # Build referral history based on ReferralEvent for backward compatibility
         history_list = []
         for event in events_qs.order_by("-created_at"):
             referred = event.referred
@@ -482,7 +532,6 @@ class ProfileStatsView(APIView):
                 }
             )
 
-        # Registrations chart (referrals per day)
         date_counts = (
             events_qs.annotate(date=TruncDate("created_at"))
             .values("date")
@@ -495,7 +544,6 @@ class ProfileStatsView(APIView):
             for item in date_counts
         ]
 
-        # Own deposits of the current member (based on ReferralEvent analytics)
         my_deposits_qs = ReferralEvent.objects.filter(referred=member).order_by(
             "created_at"
         )
@@ -508,7 +556,6 @@ class ProfileStatsView(APIView):
             for ev in my_deposits_qs
         ]
 
-        # Aggregated deposits made by referrals of the current member
         referral_deposits_qs = Deposit.objects.filter(
             Q(member__referrer=member) | Q(member__referred_by=member)
         )
@@ -518,7 +565,6 @@ class ProfileStatsView(APIView):
         )
         referral_total_deposits_amount = int(referral_deposits_total)
 
-        # Aggregated referral bonuses earned from referrals' spend transactions
         referral_bonuses_total = (
             ReferralBonus.objects.filter(referrer=member).aggregate(
                 total=Sum("amount")
@@ -526,6 +572,29 @@ class ProfileStatsView(APIView):
             or Decimal("0.00")
         )
         referral_total_bonuses_amount = int(referral_bonuses_total)
+
+        level_summary = []
+        level_agg = (
+            ReferralRelation.objects.filter(ancestor=member)
+            .values("level")
+            .annotate(
+                total_referrals=Count("descendant_id", distinct=True),
+                active_referrals=Count(
+                    "descendant_id",
+                    filter=Q(has_paid_first_bonus=True),
+                    distinct=True,
+                ),
+            )
+            .order_by("level")
+        )
+        for row in level_agg:
+            level_summary.append(
+                {
+                    "level": row["level"],
+                    "total_referrals": row["total_referrals"] or 0,
+                    "active_referrals": row["active_referrals"] or 0,
+                }
+            )
 
         stats_data = {
             "total_referrals": total_referrals,
@@ -539,6 +608,7 @@ class ProfileStatsView(APIView):
             "my_deposits": my_deposits,
             "referral_total_deposits_amount": referral_total_deposits_amount,
             "referral_total_bonuses_amount": referral_total_bonuses_amount,
+            "level_summary": level_summary,
         }
 
         serializer = ProfileStatsSerializer(stats_data)
@@ -546,10 +616,7 @@ class ProfileStatsView(APIView):
 
 
 class ReferralTreeView(APIView):
-    """Return ranked referral tree descendants for the current or specified member.
-
-    Uses ReferralRelation to expose all descendants with their depth and activation status.
-    """
+    """Return ranked referral tree descendants for the current or specified member."""
 
     authentication_classes = [MemberTokenAuthentication]
     permission_classes = [IsAuthenticated]
@@ -730,6 +797,25 @@ class ReferralBonusesView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+class ReferralRanksView(APIView):
+    """Expose configured referral ranks and multipliers for frontend."""
+
+    authentication_classes = [MemberTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        responses={200: RankRuleSerializer(many=True)},
+        description=(
+            "Получить список всех рангов реферальной программы с порогами активных "
+            "рефералов и множителями глубинного вознаграждения для игроков и инфлюенсеров."
+        ),
+    )
+    def get(self, request):
+        rules = RankRule.objects.all().order_by("required_referrals")
+        serializer = RankRuleSerializer(rules, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
 class WithdrawalRequestListCreateView(generics.ListCreateAPIView):
     """List and create withdrawal requests for the current member."""
 
@@ -805,11 +891,7 @@ class AdminMemberDetailView(generics.RetrieveUpdateAPIView):
 
 
 class AdminResetMemberPasswordView(APIView):
-    """Admin-only endpoint to reset a member's password by ID.
-
-    If new_password is not provided or is empty, a random secure password
-    is generated and returned in the response.
-    """
+    """Admin-only endpoint to reset a member's password by ID."""
 
     authentication_classes = [MemberTokenAuthentication]
     permission_classes = [IsAuthenticated, IsAdminMember]
@@ -918,7 +1000,6 @@ class AdminStatsOverviewView(APIView):
     permission_classes = [IsAuthenticated, IsAdminMember]
 
     def get(self, request):
-        # Registrations by day
         registrations_qs = (
             Member.objects.annotate(date=TruncDate("created_at"))
             .values("date")
@@ -930,7 +1011,6 @@ class AdminStatsOverviewView(APIView):
             for item in registrations_qs
         ]
 
-        # Top referrers (based on ReferralEvent analytics and aggregated rewards)
         referrer_stats = (
             ReferralEvent.objects.values("referrer")
             .annotate(
@@ -961,7 +1041,6 @@ class AdminStatsOverviewView(APIView):
                 }
             )
 
-        # Income by source: based on sum of deposit_amount instead of fixed income per client
         total_income_data = ReferralEvent.objects.aggregate(
             total=Sum("deposit_amount")
         )

@@ -17,6 +17,7 @@ from .views import (
     ReferralRewardsView,
     ReferralDepositsView,
     ReferralBonusesView,
+    ReferralRanksView,
     WithdrawalRequestListCreateView,
     AdminMemberListCreateView,
     AdminMemberDetailView,
@@ -24,6 +25,8 @@ from .views import (
     AdminReferralEventListView,
     AdminStatsOverviewView,
     WalletAdminDebitView,
+    WalletAdminDepositView,
+    WalletAdminSpendView,
 )
 
 urlpatterns = [
@@ -85,6 +88,11 @@ urlpatterns = [
         name="referral-bonuses",
     ),
     path(
+        "referrals/ranks/",
+        ReferralRanksView.as_view(),
+        name="referral-ranks",
+    ),
+    path(
         "withdrawal-requests/",
         WithdrawalRequestListCreateView.as_view(),
         name="withdrawal-requests",
@@ -119,5 +127,15 @@ urlpatterns = [
         "admin/wallet/debit/",
         WalletAdminDebitView.as_view(),
         name="admin-wallet-debit",
+    ),
+    path(
+        "admin/wallet/deposit/",
+        WalletAdminDepositView.as_view(),
+        name="admin-wallet-deposit",
+    ),
+    path(
+        "admin/wallet/spend/",
+        WalletAdminSpendView.as_view(),
+        name="admin-wallet-spend",
     ),
 ]
