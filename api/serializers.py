@@ -226,7 +226,7 @@ class WalletAdminDebitSerializer(serializers.Serializer):
 
 
 class WalletAdminDepositSerializer(serializers.Serializer):
-    """Input serializer for admin-initiated wallet deposits.""""
+    """Input serializer for admin-initiated wallet deposits."""
 
     member_id = serializers.IntegerField()
     amount = serializers.DecimalField(max_digits=12, decimal_places=2)
