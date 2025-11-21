@@ -1039,7 +1039,7 @@ const ProfilePage = () => {
 
   return (
     <main
-      data-easytag="id1-react/src/components/Profile/index.jsx"
+      data-easytag="id1-src/components/Profile/index.jsx"
       className="page page-profile"
     >
       <div className="container">

@@ -3,6 +3,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { registerMember } from '../../../api/auth';
 import { useAuth } from '../../../context/AuthContext';
 
+const REFERRAL_CODE_STORAGE_KEY = 'referral_code';
+
 const RegisterPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -21,24 +23,70 @@ const RegisterPage = () => {
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
+  // При первом открытии страницы регистрации:
+  // 1) читаем ref / referral_code из query-параметров и сохраняем в localStorage;
+  // 2) если параметра в URL нет, подставляем значение из localStorage (если есть);
+  // 3) автоматически подставляем код в форму, но не перетираем уже введённое пользователем.
   useEffect(() => {
-    if (!location || !location.search) {
+    if (typeof window === 'undefined') {
       return;
     }
 
-    const params = new URLSearchParams(location.search);
-    const refFromLink = params.get('ref');
+    let codeFromUrl = '';
 
-    if (refFromLink && !formValues.referral_code) {
-      setFormValues((prev) => ({
-        ...prev,
-        referral_code: refFromLink,
-      }));
+    if (location && location.search) {
+      const params = new URLSearchParams(location.search);
+      const refParam = params.get('ref') || params.get('referral_code');
+      if (refParam) {
+        codeFromUrl = refParam;
+        try {
+          window.localStorage.setItem(REFERRAL_CODE_STORAGE_KEY, refParam);
+        } catch (storageError) {
+          // ignore storage errors
+        }
+      }
     }
-  }, [location, formValues.referral_code]);
+
+    if (!codeFromUrl) {
+      try {
+        const stored = window.localStorage.getItem(REFERRAL_CODE_STORAGE_KEY);
+        if (stored) {
+          codeFromUrl = stored;
+        }
+      } catch (storageError) {
+        // ignore storage errors
+      }
+    }
+
+    if (!codeFromUrl) {
+      return;
+    }
+
+    setFormValues((prev) => {
+      if (prev.referral_code) {
+        return prev;
+      }
+      return {
+        ...prev,
+        referral_code: codeFromUrl,
+      };
+    });
+  }, [location.search]);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
+
+    if (name === 'referral_code' && typeof window !== 'undefined') {
+      try {
+        if (value) {
+          window.localStorage.setItem(REFERRAL_CODE_STORAGE_KEY, value);
+        } else {
+          window.localStorage.removeItem(REFERRAL_CODE_STORAGE_KEY);
+        }
+      } catch (storageError) {
+        // ignore storage errors
+      }
+    }
 
     setFormValues((prev) => ({
       ...prev,
@@ -111,14 +159,12 @@ const RegisterPage = () => {
     } catch (error) {
       console.error('Registration error', error);
 
-      // Try to extract a meaningful validation message from backend response
       const response = error && error.response ? error.response : null;
       const data = response && response.data ? response.data : null;
 
       if (data) {
         let message = '';
 
-        // Helper to extract first string from an array or value
         const pickFirst = (value) => {
           if (Array.isArray(value) && value.length > 0) {
             return String(value[0]);
@@ -146,7 +192,6 @@ const RegisterPage = () => {
         }
 
         if (!message) {
-          // As a fallback, try to take the first string value from the object
           const values = Object.values(data);
           for (let i = 0; i < values.length; i += 1) {
             const candidate = pickFirst(values[i]);
@@ -172,7 +217,7 @@ const RegisterPage = () => {
 
   return (
     <main
-      data-easytag="id1-react/src/components/Auth/Register/index.jsx"
+      data-easytag="id1-src/components/Auth/Register/index.jsx"
       className="page auth-page page-register"
     >
       <div className="container auth-container">
