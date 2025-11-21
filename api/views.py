@@ -56,6 +56,7 @@ from .serializers import (
     WalletSpendRequestSerializer,
     ReferralBonusSerializer,
     ReferralDepositSerializer,
+    WalletAdminDebitSerializer,
 )
 
 
@@ -385,6 +386,32 @@ class WalletSpendView(APIView):
                 )
             raise ValidationError({"amount": [message]})
 
+        output = WalletTransactionSerializer(tx)
+        return Response(output.data, status=status.HTTP_201_CREATED)
+
+
+class WalletAdminDebitView(APIView):
+    """Admin-only endpoint to debit funds from a member's wallet."""
+
+    authentication_classes = [MemberTokenAuthentication]
+    permission_classes = [IsAuthenticated, IsAdminMember]
+
+    @extend_schema(
+        request=WalletAdminDebitSerializer,
+        responses={201: WalletTransactionSerializer},
+        description=(
+            "Администратор вручную списывает средства с кошелька пользователя. "
+            "Операция выполняется атомарно, проверяется достаточность баланса "
+            "и создаётся запись WalletTransaction с типом admin_debit."
+        ),
+    )
+    def post(self, request):
+        serializer = WalletAdminDebitSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        tx = serializer.save()
         output = WalletTransactionSerializer(tx)
         return Response(output.data, status=status.HTTP_201_CREATED)
 

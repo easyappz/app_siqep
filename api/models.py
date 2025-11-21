@@ -383,6 +383,37 @@ class Member(models.Model):
             meta=meta,
         )
 
+    def admin_debit(
+        self,
+        amount: Decimal,
+        reason: str | None = None,
+        meta: dict | None = None,
+        admin: "Member" | None = None,
+    ) -> "WalletTransaction":
+        """Admin-initiated debit operation on the member's wallet.
+
+        - Validates that the amount is positive.
+        - Ensures the balance is sufficient.
+        - Creates a WalletTransaction with type ADMIN_DEBIT.
+        - Optionally stores admin id and source in meta.
+        """
+
+        if amount <= 0:
+            raise ValueError("Debit amount must be positive.")
+
+        base_meta: dict = {"source": "admin_debit"}
+        if admin is not None and getattr(admin, "id", None) is not None:
+            base_meta["admin_id"] = admin.id
+        if meta:
+            base_meta.update(meta)
+
+        return self._apply_wallet_change(
+            delta=-amount,
+            tx_type=WalletTransaction.Type.ADMIN_DEBIT,
+            description=reason or "",
+            meta=base_meta,
+        )
+
 
 class Deposit(models.Model):
     id = models.AutoField(primary_key=True)
@@ -612,6 +643,7 @@ class WalletTransaction(models.Model):
         WITHDRAW = "withdraw", "Withdraw"
         REFUND = "refund", "Refund"
         ADJUSTMENT = "adjustment", "Adjustment"
+        ADMIN_DEBIT = "admin_debit", "Admin debit"
         BONUS = "bonus", "Referral bonus"
 
     id = models.AutoField(primary_key=True)

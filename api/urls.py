@@ -25,6 +25,7 @@ from .views import (
     AdminStatsOverviewView,
     TestSimulateDepositsView,
     SimulateDemoDepositsView,
+    WalletAdminDebitView,
 )
 
 urlpatterns = [
@@ -115,6 +116,11 @@ urlpatterns = [
         "admin/stats/overview/",
         AdminStatsOverviewView.as_view(),
         name="admin-stats-overview",
+    ),
+    path(
+        "admin/wallet/debit/",
+        WalletAdminDebitView.as_view(),
+        name="admin-wallet-debit",
     ),
     # Test-only endpoints
     path(

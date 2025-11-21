@@ -692,6 +692,34 @@ paths:
                 $ref: '#/components/schemas/AdminStatsOverview'
         '401':
           description: Требуется аутентификация
+  /api/admin/wallet/debit/:
+    post:
+      operationId: admin_wallet_debit_create
+      summary: 'Админ-панель: Списание средств с баланса пользователя'
+      description: 'Администратор вручную списывает средства с кошелька пользователя. Операция выполняется атомарно, проверяется достаточность баланса, создаётся запись WalletTransaction с типом admin_debit.'
+      tags:
+        - admin
+      security:
+        - MemberTokenAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminWalletDebitRequest'
+      responses:
+        '201':
+          description: 'Операция списания успешно создана.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletTransaction'
+        '400':
+          description: 'Ошибка валидации данных (например, неположительная сумма или недостаточно средств на балансе пользователя).'
+        '401':
+          description: 'Требуется аутентификация.'
+        '403':
+          description: 'Доступ запрещён (недостаточно прав администратора).'
   /api/test/simulate-deposits/:
     post:
       operationId: test_simulate_deposits_create
@@ -1699,6 +1727,24 @@ components:
         - registrations_by_day
         - top_referrers
         - income_by_source
+    AdminWalletDebitRequest:
+      type: object
+      description: 'Данные для админского списания средств с кошелька пользователя.'
+      properties:
+        member_id:
+          type: integer
+          description: 'ID пользователя, с кошелька которого нужно списать средства.'
+        amount:
+          type: string
+          format: decimal
+          description: 'Сумма списания в рублях. Должна быть положительной и не превышать текущий баланс пользователя.'
+        reason:
+          type: string
+          nullable: true
+          description: 'Необязательное текстовое пояснение причины списания (отображается в описании транзакции кошелька).'
+      required:
+        - member_id
+        - amount
     PaginatedAdminMemberList:
       type: object
       description: 'Страница списка пользователей для админ-панели.'
@@ -2014,6 +2060,7 @@ components:
             - withdraw
             - refund
             - adjustment
+            - admin_debit
             - bonus
         amount:
           type: string

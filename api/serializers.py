@@ -171,6 +171,58 @@ class WalletSpendRequestSerializer(serializers.Serializer):
         return value
 
 
+class WalletAdminDebitSerializer(serializers.Serializer):
+    """Input serializer for admin-initiated wallet debits."""
+
+    member_id = serializers.IntegerField()
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    reason = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    def validate(self, attrs):
+        member_id = attrs.get("member_id")
+        amount = attrs.get("amount")
+
+        try:
+            member = Member.objects.get(pk=member_id)
+        except Member.DoesNotExist:
+            raise serializers.ValidationError(
+                {"member_id": "Пользователь с таким ID не найден."}
+            )
+
+        if amount is None or amount <= 0:
+            raise serializers.ValidationError(
+                {"amount": "Сумма списания должна быть положительным числом."}
+            )
+
+        balance = member.get_balance()
+        if balance < amount:
+            raise serializers.ValidationError(
+                {"amount": "Недостаточно средств на балансе пользователя для списания."}
+            )
+
+        attrs["member"] = member
+        return attrs
+
+    def create(self, validated_data):
+        member: Member = validated_data["member"]
+        amount = validated_data["amount"]
+        reason = validated_data.get("reason") or ""
+
+        request = self.context.get("request")
+        admin = getattr(request, "user", None) if request is not None else None
+
+        try:
+            tx = member.admin_debit(
+                amount=amount,
+                reason=reason,
+                admin=admin,
+            )
+        except ValueError as exc:
+            raise serializers.ValidationError({"amount": [str(exc)]})
+
+        return tx
+
+
 class ReferralBonusSerializer(serializers.ModelSerializer):
     """Serializer for referral bonuses created on wallet spend events."""
 
@@ -482,7 +534,7 @@ class RegistrationSerializer(serializers.Serializer):
 
         - The direct referrer receives a ReferralEvent with deposit_amount = 1000
           (для статистики и обратной совместимости).
-        - The deep referral tree is constructed via `on_new_user_registered`.
+        - The ranked referral tree is constructed via `on_new_user_registered`.
         - Финансовые бонусы (V-Coins/₽) начисляются позже, когда реферал
           завершает свой первый платный турнир/депозит.
         """
