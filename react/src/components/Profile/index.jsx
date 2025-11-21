@@ -25,7 +25,6 @@ import {
   getWalletSummary,
   getWalletTransactions,
   createWalletDeposit,
-  createWalletSpend,
 } from '../../api/wallet';
 
 function getUserTypeFromMember(member) {
@@ -180,13 +179,6 @@ const ProfilePage = () => {
   const [walletDepositError, setWalletDepositError] = useState('');
   const [walletDepositSuccess, setWalletDepositSuccess] = useState('');
   const [isSubmittingDeposit, setIsSubmittingDeposit] = useState(false);
-
-  const [walletSpendAmount, setWalletSpendAmount] = useState('');
-  const [walletSpendDescription, setWalletSpendDescription] = useState('');
-  const [walletSpendCategory, setWalletSpendCategory] = useState('');
-  const [walletSpendError, setWalletSpendError] = useState('');
-  const [walletSpendSuccess, setWalletSpendSuccess] = useState('');
-  const [isSubmittingSpend, setIsSubmittingSpend] = useState(false);
 
   const [referralBonuses, setReferralBonuses] = useState([]);
   const [referralBonusesLoading, setReferralBonusesLoading] = useState(false);
@@ -1023,68 +1015,6 @@ const ProfilePage = () => {
     }
   };
 
-  const handleWalletSpendSubmit = async (event) => {
-    if (event && event.preventDefault) {
-      event.preventDefault();
-    }
-
-    setWalletSpendError('');
-    setWalletSpendSuccess('');
-
-    const amountNumber = Number(walletSpendAmount);
-
-    if (!walletSpendAmount || Number.isNaN(amountNumber) || amountNumber <= 0) {
-      setWalletSpendError('Сумма должна быть положительным числом.');
-      return;
-    }
-
-    if (!walletSpendDescription) {
-      setWalletSpendError('Укажите описание операции, за что списываются средства.');
-      return;
-    }
-
-    setIsSubmittingSpend(true);
-
-    try {
-      const payload = {
-        amount: amountNumber,
-        description: walletSpendDescription,
-      };
-
-      if (walletSpendCategory) {
-        payload.category = walletSpendCategory;
-      }
-
-      await createWalletSpend(payload);
-
-      setWalletSpendSuccess('Списание успешно выполнено.');
-      setWalletSpendAmount('');
-      setWalletSpendDescription('');
-      setWalletSpendCategory('');
-
-      await loadWalletSummary();
-      await loadWalletTransactions(1);
-    } catch (error) {
-      const response = error && error.response ? error.response : null;
-
-      if (response && response.status === 401) {
-        logout();
-        navigate('/login', { replace: true });
-        return;
-      }
-
-      const message = buildWalletErrorMessage(
-        error,
-        'Не удалось списать средства. Попробуйте ещё раз.',
-        'Недостаточно средств на кошельке.',
-      );
-
-      setWalletSpendError(message);
-    } finally {
-      setIsSubmittingSpend(false);
-    }
-  };
-
   const handleWalletPrevPage = () => {
     if (walletTransactionsLoading || !walletTransactionsHasPrev) {
       return;
@@ -1429,9 +1359,9 @@ const ProfilePage = () => {
         <section className="card profile-wallet-card">
           <h2 className="profile-section-title">Кошелёк игрока</h2>
           <p className="profile-section-text">
-            Внутренний кошелёк для управления средствами внутри клуба. Вы можете
-            пополнить баланс, оплачивать из него участие в играх и видеть историю
-            всех операций.
+            Внутренний кошелёк для учета средств внутри клуба. Вы можете пополнить баланс и
+            видеть историю всех операций; списания и игровые траты выполняются
+            администратором клуба и отображаются здесь автоматически.
           </p>
 
           {walletLoading && !walletError && (
@@ -1451,7 +1381,7 @@ const ProfilePage = () => {
                   <div className="profile-stat-label">Текущий баланс</div>
                   <div className="profile-wallet-balance-value">{`${walletBalance} ₽`}</div>
                   <div className="profile-stat-caption">
-                    Средства, доступные для игр и оплат внутри клуба.
+                    Средства, доступные для отображения и контроля ваших игр в клубе.
                   </div>
                 </div>
 
@@ -1467,7 +1397,8 @@ const ProfilePage = () => {
                   <div className="profile-stat-label">Всего списано</div>
                   <div className="profile-wallet-summary-value">{`${walletTotalSpent} ₽`}</div>
                   <div className="profile-stat-caption">
-                    Сумма всех оплат и внутренних списаний из кошелька.
+                    Сумма всех оплат и внутренних списаний из кошелька, проведённых
+                    администратором клуба.
                   </div>
                 </div>
               </div>
@@ -1533,85 +1464,6 @@ const ProfilePage = () => {
                         disabled={isSubmittingDeposit}
                       >
                         {isSubmittingDeposit ? 'Обработка...' : 'Пополнить баланс'}
-                      </button>
-                    </div>
-                  </form>
-                </div>
-
-                <div className="profile-wallet-form">
-                  <h3 className="profile-section-subtitle">Списать средства</h3>
-                  <p className="profile-wallet-inline-help">
-                    Укажите сумму и описание операции (за что списываются средства). При
-                    недостатке средств операция будет отклонена.
-                  </p>
-
-                  <form
-                    className="profile-wallet-form-inner"
-                    onSubmit={handleWalletSpendSubmit}
-                  >
-                    <div className="profile-form-row">
-                      <label className="profile-label" htmlFor="walletSpendAmount">
-                        Сумма (₽)
-                      </label>
-                      <input
-                        id="walletSpendAmount"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        className="profile-input"
-                        value={walletSpendAmount}
-                        onChange={(event) => setWalletSpendAmount(event.target.value)}
-                        placeholder="Например: 300"
-                      />
-                    </div>
-
-                    <div className="profile-form-row">
-                      <label className="profile-label" htmlFor="walletSpendDescription">
-                        Описание операции
-                      </label>
-                      <input
-                        id="walletSpendDescription"
-                        type="text"
-                        className="profile-input"
-                        value={walletSpendDescription}
-                        onChange={(event) => setWalletSpendDescription(event.target.value)}
-                        placeholder="Например: взнос за турнир"
-                      />
-                    </div>
-
-                    <div className="profile-form-row">
-                      <label className="profile-label" htmlFor="walletSpendCategory">
-                        Категория (опционально)
-                      </label>
-                      <input
-                        id="walletSpendCategory"
-                        type="text"
-                        className="profile-input"
-                        value={walletSpendCategory}
-                        onChange={(event) => setWalletSpendCategory(event.target.value)}
-                        placeholder="Например: игра, сервис, другое"
-                      />
-                    </div>
-
-                    {walletSpendError && (
-                      <div className="profile-status-message profile-status-error">
-                        {walletSpendError}
-                      </div>
-                    )}
-
-                    {walletSpendSuccess && (
-                      <div className="profile-status-message profile-status-success">
-                        {walletSpendSuccess}
-                      </div>
-                    )}
-
-                    <div className="profile-form-actions">
-                      <button
-                        type="submit"
-                        className="btn btn-secondary"
-                        disabled={isSubmittingSpend}
-                      >
-                        {isSubmittingSpend ? 'Обработка...' : 'Списать средства'}
                       </button>
                     </div>
                   </form>
