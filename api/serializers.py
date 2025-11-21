@@ -662,3 +662,73 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         attrs["member"] = reset_code.member
         attrs["reset_code"] = reset_code
         return attrs
+
+
+class MeUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for updating the current authenticated member's profile.
+
+    Allows changing first/last name, email, and withdrawal requisites.
+    Used by MeView.patch() with partial updates.
+    """
+
+    class Meta:
+        model = Member
+        fields = [
+            "first_name",
+            "last_name",
+            "email",
+            "withdrawal_bank_details",
+            "withdrawal_crypto_wallet",
+        ]
+
+    def validate_email(self, value: str) -> str:
+        """Ensure email is unique among members, excluding the current instance.
+
+        Mirrors the logic from RegistrationSerializer.validate_email but allows
+        keeping the same email on the current member.
+        """
+        if not value:
+            return value
+
+        qs = Member.objects.filter(email=value)
+        instance = getattr(self, "instance", None)
+        if instance is not None and instance.pk is not None:
+            qs = qs.exclude(pk=instance.pk)
+
+        if qs.exists():
+            raise serializers.ValidationError(
+                "Пользователь с такой электронной почтой уже существует."
+            )
+        return value
+
+    def update(self, instance: Member, validated_data: dict) -> Member:
+        """Apply partial updates to the member profile.
+
+        Normalizes empty-string email to None so it is compatible with a
+        nullable email field in the database.
+        """
+        email = validated_data.get("email", serializers.empty)
+        if email is not serializers.empty:
+            if email == "":
+                instance.email = None
+            else:
+                instance.email = email
+
+        first_name = validated_data.get("first_name", serializers.empty)
+        if first_name is not serializers.empty:
+            instance.first_name = first_name
+
+        last_name = validated_data.get("last_name", serializers.empty)
+        if last_name is not serializers.empty:
+            instance.last_name = last_name
+
+        bank_details = validated_data.get("withdrawal_bank_details", serializers.empty)
+        if bank_details is not serializers.empty:
+            instance.withdrawal_bank_details = bank_details
+
+        crypto_wallet = validated_data.get("withdrawal_crypto_wallet", serializers.empty)
+        if crypto_wallet is not serializers.empty:
+            instance.withdrawal_crypto_wallet = crypto_wallet
+
+        instance.save()
+        return instance
