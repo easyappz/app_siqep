@@ -456,11 +456,30 @@ paths:
     get:
       operationId: admin_members_list
       summary: 'Админ-панель: Все пользователи'
-      description: 'Список всех пользователей (Member) для админ-панели.'
+      description: 'Список всех пользователей (Member) для админ-панели с возможностью поиска по номеру телефона.'
       tags:
         - admin
       security:
         - MemberTokenAuth: []
+      parameters:
+        - name: search_phone
+          in: query
+          required: false
+          description: 'Поиск пользователя по номеру телефона (подстрочное совпадение).'
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          description: 'Номер страницы для постраничной навигации.'
+          schema:
+            type: integer
+        - name: page_size
+          in: query
+          required: false
+          description: 'Размер страницы (количество элементов на страницу), если поддерживается настройками пагинации.'
+          schema:
+            type: integer
       responses:
         '200':
           description: Список пользователей
@@ -490,7 +509,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdminMember'
+                $ref: '#/components/schemas/AdminMemberDetail'
         '400':
           description: Ошибка валидации данных
         '401':
@@ -499,7 +518,7 @@ paths:
     get:
       operationId: admin_members_retrieve
       summary: 'Админ-панель: Детали пользователя'
-      description: 'Получить подробную информацию о пользователе для админ-панели.'
+      description: 'Получить подробную информацию о пользователе для админ-панели, включая текущие балансы и историю операций админских корректировок.'
       tags:
         - admin
       security:
@@ -517,7 +536,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdminMember'
+                $ref: '#/components/schemas/AdminMemberDetail'
         '401':
           description: Требуется аутентификация
         '404':
@@ -542,14 +561,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AdminMember'
+              $ref: '#/components/schemas/AdminMemberDetail'
       responses:
         '200':
           description: Пользователь обновлён
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdminMember'
+                $ref: '#/components/schemas/AdminMemberDetail'
         '400':
           description: Ошибка валидации данных
         '401':
@@ -576,20 +595,57 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AdminMember'
+              $ref: '#/components/schemas/AdminMemberDetail'
       responses:
         '200':
           description: Пользователь обновлён
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdminMember'
+                $ref: '#/components/schemas/AdminMemberDetail'
         '400':
           description: Ошибка валидации данных
         '401':
           description: Требуется аутентификация
         '404':
           description: Пользователь не найден
+  /api/admin/members/{id}/adjust-balance/:
+    post:
+      operationId: admin_members_adjust_balance_create
+      summary: 'Админ-панель: Корректировка баланса пользователя'
+      description: 'Администратор выполняет ручную корректировку денежных средств и/или V-Coins пользователя. Операция атомарна, не допускает отрицательных остатков и фиксируется в истории AdminBalanceOperation.'
+      tags:
+        - admin
+      security:
+        - MemberTokenAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 'ID пользователя, баланс которого нужно скорректировать.'
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminBalanceAdjustmentRequest'
+      responses:
+        '200':
+          description: 'Обновлённые данные пользователя после корректировки балансов.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminMemberDetail'
+        '400':
+          description: 'Ошибка валидации данных (например, попытка списания сверх доступного баланса).'
+        '401':
+          description: 'Требуется аутентификация.'
+        '403':
+          description: 'Доступ запрещён (недостаточно прав администратора).'
+        '404':
+          description: 'Пользователь не найден.'
   /api/admin/members/{id}/reset-password/:
     post:
       operationId: admin_members_reset_password_create
@@ -1211,7 +1267,7 @@ components:
         - detail
     PasswordResetRequestRequest:
       type: object
-      description: 'Данные для запроса одноразового кода сброса пароля.'
+      description: 'Данные для запроса одноразового кодa сброса пароля.'
       properties:
         email:
           type: string
@@ -1788,7 +1844,7 @@ components:
         results:
           type: array
           items:
-            $ref: '#/components/schemas/AdminMember'
+            $ref: '#/components/schemas/AdminMemberListItem'
       required:
         - count
         - results
@@ -1990,6 +2046,203 @@ components:
       required:
         - count
         - results
+    AdminOperationRecord:
+      type: object
+      description: 'Историческая запись админской операции по изменению баланса пользователя.'
+      properties:
+        id:
+          type: integer
+        operation_type:
+          type: string
+          description: 'Тип операции: начисление/списание депозита, изменение V-Coins или комбинированная операция.'
+          enum:
+            - deposit_accrual
+            - deposit_withdrawal
+            - vcoins_increase
+            - vcoins_decrease
+            - combined_adjustment
+        deposit_change:
+          type: string
+          format: decimal
+          nullable: true
+          description: 'Изменение денежного баланса (депозита) в рублях. Положительное значение — начисление, отрицательное — списание.'
+        vcoins_change:
+          type: string
+          format: decimal
+          nullable: true
+          description: 'Изменение баланса V-Coins. Положительное значение — начисление, отрицательное — списание.'
+        balance_deposit_after:
+          type: string
+          format: decimal
+          description: 'Денежный баланс пользователя после применения операции.'
+        balance_vcoins_after:
+          type: string
+          format: decimal
+          description: 'Баланс V-Coins пользователя после применения операции.'
+        comment:
+          type: string
+          description: 'Опциональное описание/комментарий к операции.'
+        created_at:
+          type: string
+          format: date-time
+          description: 'Дата и время создания операции.'
+        created_by:
+          allOf:
+            - $ref: '#/components/schemas/MemberReferrer'
+          nullable: true
+          description: 'Администратор, выполнивший операцию.'
+      required:
+        - id
+        - operation_type
+        - balance_deposit_after
+        - balance_vcoins_after
+        - created_at
+    AdminMemberListItem:
+      type: object
+      description: 'Элемент списка пользователей для админ-панели.'
+      properties:
+        id:
+          type: integer
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+          format: email
+          nullable: true
+        is_influencer:
+          type: boolean
+        is_admin:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        wallet_balance:
+          type: string
+          format: decimal
+          description: 'Текущий денежный баланс кошелька пользователя.'
+        v_coins_balance:
+          type: string
+          format: decimal
+          description: 'Текущий баланс V-Coins пользователя.'
+        is_active:
+          type: boolean
+          description: 'Признак активности пользователя (например, есть средства на балансе или V-Coins).'
+      required:
+        - id
+        - first_name
+        - last_name
+        - phone
+        - is_influencer
+        - is_admin
+        - created_at
+        - wallet_balance
+        - v_coins_balance
+        - is_active
+    AdminMemberDetail:
+      type: object
+      description: 'Расширенная информация о пользователе для админ-панели, включая балансы и историю операций.'
+      properties:
+        id:
+          type: integer
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+          format: email
+          nullable: true
+        is_influencer:
+          type: boolean
+        is_admin:
+          type: boolean
+        referral_code:
+          type: string
+        referred_by:
+          allOf:
+            - $ref: '#/components/schemas/MemberReferrer'
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        user_type:
+          type: string
+          enum:
+            - player
+            - influencer
+        rank:
+          type: string
+          enum:
+            - standard
+            - silver
+            - gold
+            - platinum
+        v_coins_balance:
+          type: string
+          format: decimal
+        cash_balance:
+          type: string
+          format: decimal
+        wallet_balance:
+          type: string
+          format: decimal
+        total_deposits:
+          type: string
+          format: decimal
+        total_influencer_earnings:
+          type: string
+          format: decimal
+        available_for_withdrawal:
+          type: string
+          format: decimal
+        operations:
+          type: array
+          description: 'Последние админские операции по балансу пользователя (не более 20 записей).'
+          items:
+            $ref: '#/components/schemas/AdminOperationRecord'
+      required:
+        - id
+        - first_name
+        - last_name
+        - phone
+        - is_influencer
+        - is_admin
+        - referral_code
+        - created_at
+        - user_type
+        - rank
+        - v_coins_balance
+        - cash_balance
+        - wallet_balance
+        - total_deposits
+        - total_influencer_earnings
+        - available_for_withdrawal
+        - operations
+    AdminBalanceAdjustmentRequest:
+      type: object
+      description: 'Запрос на админскую корректировку баланса пользователя.'
+      properties:
+        deposit_delta:
+          type: string
+          format: decimal
+          nullable: true
+          description: 'Изменение денежного баланса (депозита) в рублях. Положительное значение — начисление, отрицательное — списание.'
+        vcoins_delta:
+          type: string
+          format: decimal
+          nullable: true
+          description: 'Изменение баланса V-Coins. Положительное значение — начисление, отрицательное — списание.'
+        comment:
+          type: string
+          nullable: true
+          description: 'Опциональный комментарий/причина корректировки.'
+      required: []
   securitySchemes:
     basicAuth:
       type: http

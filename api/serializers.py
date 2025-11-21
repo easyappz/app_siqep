@@ -1,5 +1,6 @@
 from datetime import timedelta
 import secrets
+from decimal import Decimal
 
 from django.utils import timezone
 from django.db.models import Sum
@@ -16,6 +17,7 @@ from .models import (
     PasswordResetCode,
     WalletTransaction,
     ReferralBonus,
+    AdminBalanceOperation,
 )
 from .referral_utils import (
     on_new_user_registered,
@@ -224,7 +226,7 @@ class WalletAdminDebitSerializer(serializers.Serializer):
 
 
 class WalletAdminDepositSerializer(serializers.Serializer):
-    """Input serializer for admin-initiated wallet deposits."""
+    """Input serializer for admin-initiated wallet deposits.""""
 
     member_id = serializers.IntegerField()
     amount = serializers.DecimalField(max_digits=12, decimal_places=2)
@@ -937,6 +939,25 @@ class ReferralRewardsSummarySerializer(serializers.Serializer):
 # ============================
 
 
+class AdminBalanceOperationSerializer(serializers.ModelSerializer):
+    created_by = MemberReferrerSerializer(read_only=True)
+
+    class Meta:
+        model = AdminBalanceOperation
+        fields = [
+            "id",
+            "operation_type",
+            "deposit_change",
+            "vcoins_change",
+            "balance_deposit_after",
+            "balance_vcoins_after",
+            "comment",
+            "created_at",
+            "created_by",
+        ]
+        read_only_fields = fields
+
+
 class AdminMemberSerializer(serializers.ModelSerializer):
     referred_by = MemberReferrerSerializer(read_only=True)
     total_referrals = serializers.SerializerMethodField()
@@ -970,6 +991,110 @@ class AdminMemberSerializer(serializers.ModelSerializer):
 
     def get_total_referrals(self, obj: Member) -> int:
         return ReferralEvent.objects.filter(referrer=obj).count()
+
+
+class AdminMemberListSerializer(serializers.ModelSerializer):
+    wallet_balance = serializers.SerializerMethodField()
+    v_coins_balance = serializers.SerializerMethodField()
+    is_active = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Member
+        fields = [
+            "id",
+            "first_name",
+            "last_name",
+            "phone",
+            "email",
+            "is_influencer",
+            "is_admin",
+            "created_at",
+            "wallet_balance",
+            "v_coins_balance",
+            "is_active",
+        ]
+        read_only_fields = fields
+
+    def get_wallet_balance(self, obj: Member) -> str:
+        balance = getattr(obj, "wallet_balance", None)
+        if balance is None:
+            return "0.00"
+        return str(balance)
+
+    def get_v_coins_balance(self, obj: Member) -> str:
+        balance = getattr(obj, "v_coins_balance", None)
+        if balance is None:
+            return "0.00"
+        return str(balance)
+
+    def get_is_active(self, obj: Member) -> bool:
+        wallet_balance = getattr(obj, "wallet_balance", Decimal("0.00"))
+        v_coins = getattr(obj, "v_coins_balance", Decimal("0.00"))
+        return bool(wallet_balance > Decimal("0.00") or v_coins > Decimal("0.00"))
+
+
+class AdminMemberDetailSerializer(serializers.ModelSerializer):
+    referred_by = MemberReferrerSerializer(read_only=True)
+    total_deposits = serializers.SerializerMethodField()
+    total_influencer_earnings = serializers.SerializerMethodField()
+    available_for_withdrawal = serializers.SerializerMethodField()
+    wallet_balance = serializers.SerializerMethodField()
+    operations = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Member
+        fields = [
+            "id",
+            "first_name",
+            "last_name",
+            "phone",
+            "email",
+            "is_influencer",
+            "is_admin",
+            "referral_code",
+            "referred_by",
+            "created_at",
+            "user_type",
+            "rank",
+            "v_coins_balance",
+            "cash_balance",
+            "wallet_balance",
+            "total_deposits",
+            "total_influencer_earnings",
+            "available_for_withdrawal",
+            "operations",
+        ]
+        read_only_fields = fields
+
+    def get_total_deposits(self, obj: Member) -> str:
+        total = getattr(obj, "total_deposits", None)
+        if total is None:
+            return "0.00"
+        return str(total)
+
+    def get_total_influencer_earnings(self, obj: Member) -> str:
+        total = getattr(obj, "total_influencer_earnings", None)
+        if total is None:
+            return "0.00"
+        return str(total)
+
+    def get_available_for_withdrawal(self, obj: Member) -> str:
+        available = getattr(obj, "available_for_withdrawal", None)
+        if available is None:
+            return "0.00"
+        return str(available)
+
+    def get_wallet_balance(self, obj: Member) -> str:
+        balance = getattr(obj, "wallet_balance", None)
+        if balance is None:
+            return "0.00"
+        return str(balance)
+
+    def get_operations(self, obj: Member):
+        operations_qs = obj.admin_balance_operations.select_related("created_by").order_by(
+            "-created_at"
+        )[:20]
+        return AdminBalanceOperationSerializer(operations_qs, many=True).data
 
 
 class AdminCreateMemberSerializer(serializers.ModelSerializer):
@@ -1046,6 +1171,60 @@ class AdminResetMemberPasswordSerializer(serializers.Serializer):
                 "Пароль должен содержать не менее 6 символов."
             )
         return value
+
+
+class AdminBalanceAdjustmentSerializer(serializers.Serializer):
+    deposit_delta = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        required=False,
+        allow_null=True,
+    )
+    vcoins_delta = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        required=False,
+        allow_null=True,
+    )
+    comment = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        max_length=1000,
+    )
+
+    def validate(self, attrs):
+        deposit_delta = attrs.get("deposit_delta")
+        vcoins_delta = attrs.get("vcoins_delta")
+
+        zero = Decimal("0.00")
+
+        has_deposit_change = deposit_delta is not None and deposit_delta != zero
+        has_vcoins_change = vcoins_delta is not None and vcoins_delta != zero
+
+        if not has_deposit_change and not has_vcoins_change:
+            raise serializers.ValidationError(
+                "Укажите изменение депозита или V-Coins (значение не должно быть нулевым)."
+            )
+
+        member = self.context.get("member")
+        if not isinstance(member, Member):
+            return attrs
+
+        current_deposit = member.get_balance()
+        current_vcoins = member.v_coins_balance or Decimal("0.00")
+
+        if has_deposit_change and current_deposit + deposit_delta < zero:
+            raise serializers.ValidationError(
+                {"deposit_delta": "Недостаточно средств на денежном балансе пользователя для списания."}
+            )
+
+        if has_vcoins_change and current_vcoins + vcoins_delta < zero:
+            raise serializers.ValidationError(
+                {"vcoins_delta": "Недостаточно V-Coins на балансе пользователя для списания."}
+            )
+
+        return attrs
 
 
 # ============================

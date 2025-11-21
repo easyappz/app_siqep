@@ -3,6 +3,7 @@ from datetime import timedelta, datetime
 from decimal import Decimal
 
 from django.utils import timezone
+from django.db import transaction
 from django.db.models import Count, Sum, Q
 from django.db.models.functions import TruncDate
 from django.http import Http404
@@ -25,6 +26,7 @@ from .models import (
     Deposit,
     ReferralBonus,
     RankRule,
+    AdminBalanceOperation,
 )
 from .permissions import IsAdminMember
 from .serializers import (
@@ -41,6 +43,8 @@ from .serializers import (
     ReferralRewardSerializer,
     ReferralRewardsSummarySerializer,
     AdminMemberSerializer,
+    AdminMemberListSerializer,
+    AdminMemberDetailSerializer,
     AdminCreateMemberSerializer,
     AdminResetMemberPasswordSerializer,
     ReferralEventAdminSerializer,
@@ -57,6 +61,7 @@ from .serializers import (
     WalletAdminDepositSerializer,
     WalletAdminSpendSerializer,
     RankRuleSerializer,
+    AdminBalanceAdjustmentSerializer,
 )
 
 
@@ -860,22 +865,31 @@ class WithdrawalRequestListCreateView(generics.ListCreateAPIView):
 
 
 class AdminMemberListCreateView(generics.ListCreateAPIView):
-    """List all members and create new ones (including influencers/admins)."""
+    """List all members and create new ones (including influencers/admins).
+
+    Supports search by phone via ?search_phone=... query parameter.
+    """
 
     authentication_classes = [MemberTokenAuthentication]
     permission_classes = [IsAuthenticated, IsAdminMember]
-    queryset = Member.objects.all().order_by("-created_at")
+
+    def get_queryset(self):
+        qs = Member.objects.all().order_by("-created_at")
+        search_phone = self.request.query_params.get("search_phone")
+        if search_phone:
+            qs = qs.filter(phone__icontains=search_phone)
+        return qs
 
     def get_serializer_class(self):
         if self.request.method == "POST":
             return AdminCreateMemberSerializer
-        return AdminMemberSerializer
+        return AdminMemberListSerializer
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         member = serializer.save()
-        output_serializer = AdminMemberSerializer(
+        output_serializer = AdminMemberDetailSerializer(
             member,
             context=self.get_serializer_context(),
         )
@@ -888,8 +902,103 @@ class AdminMemberDetailView(generics.RetrieveUpdateAPIView):
     authentication_classes = [MemberTokenAuthentication]
     permission_classes = [IsAuthenticated, IsAdminMember]
     queryset = Member.objects.all()
-    serializer_class = AdminMemberSerializer
+    serializer_class = AdminMemberDetailSerializer
     lookup_field = "pk"
+
+
+class AdminAdjustMemberBalanceView(APIView):
+    """Admin-only endpoint to adjust a member's deposit and V-Coins balances.
+
+    Allows increasing or decreasing wallet (cash) balance and V-Coins in a single
+    atomic operation. Negative balances are not allowed.
+    """
+
+    authentication_classes = [MemberTokenAuthentication]
+    permission_classes = [IsAuthenticated, IsAdminMember]
+
+    @extend_schema(
+        request=AdminBalanceAdjustmentSerializer,
+        responses={200: AdminMemberDetailSerializer},
+        description=(
+            "Администратор изменяет денежный баланс и/или баланс V-Coins пользователя. "
+            "Поддерживаются как начисления (положительные значения), так и списания "
+            "(отрицательные значения). Оба изменения выполняются атомарно, история "
+            "фиксируется в модели AdminBalanceOperation."
+        ),
+    )
+    def post(self, request, pk: int):
+        try:
+            member = Member.objects.get(pk=pk)
+        except Member.DoesNotExist:
+            return Response(
+                {"detail": "Пользователь не найден."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = AdminBalanceAdjustmentSerializer(
+            data=request.data,
+            context={"member": member},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        deposit_delta = serializer.validated_data.get("deposit_delta") or Decimal("0.00")
+        vcoins_delta = serializer.validated_data.get("vcoins_delta") or Decimal("0.00")
+        comment = serializer.validated_data.get("comment") or ""
+
+        admin: Member = request.user
+
+        with transaction.atomic():
+            locked_member = Member.objects.select_for_update().get(pk=member.pk)
+
+            current_deposit = locked_member.get_balance()
+            current_vcoins = locked_member.v_coins_balance or Decimal("0.00")
+
+            new_deposit = current_deposit
+            new_vcoins = current_vcoins
+
+            wallet_tx = None
+            if deposit_delta != Decimal("0.00"):
+                wallet_tx = locked_member.adjust_balance(
+                    delta=deposit_delta,
+                    description=comment,
+                    meta={"source": "admin_adjust_balance"},
+                )
+                new_deposit = wallet_tx.balance_after
+
+            if vcoins_delta != Decimal("0.00"):
+                new_vcoins = current_vcoins + vcoins_delta
+                if new_vcoins < Decimal("0.00"):
+                    raise ValidationError(
+                        {"vcoins_delta": ["Недостаточно V-Coins на балансе пользователя для списания."]}
+                    )
+                locked_member.v_coins_balance = new_vcoins
+                locked_member.save(update_fields=["v_coins_balance"])
+
+            if deposit_delta != Decimal("0.00") and vcoins_delta != Decimal("0.00"):
+                operation_type = AdminBalanceOperation.OperationType.COMBINED_ADJUSTMENT
+            elif deposit_delta > Decimal("0.00"):
+                operation_type = AdminBalanceOperation.OperationType.DEPOSIT_ACCRUAL
+            elif deposit_delta < Decimal("0.00"):
+                operation_type = AdminBalanceOperation.OperationType.DEPOSIT_WITHDRAWAL
+            elif vcoins_delta > Decimal("0.00"):
+                operation_type = AdminBalanceOperation.OperationType.VCOINS_INCREASE
+            else:
+                operation_type = AdminBalanceOperation.OperationType.VCOINS_DECREASE
+
+            AdminBalanceOperation.objects.create(
+                member=locked_member,
+                operation_type=operation_type,
+                deposit_change=deposit_delta if deposit_delta != Decimal("0.00") else None,
+                vcoins_change=vcoins_delta if vcoins_delta != Decimal("0.00") else None,
+                balance_deposit_after=new_deposit,
+                balance_vcoins_after=new_vcoins,
+                comment=comment,
+                created_by=admin,
+            )
+
+        member.refresh_from_db()
+        output_serializer = AdminMemberDetailSerializer(member)
+        return Response(output_serializer.data, status=status.HTTP_200_OK)
 
 
 class AdminResetMemberPasswordView(APIView):

@@ -675,6 +675,67 @@ class WalletTransaction(models.Model):
         )
 
 
+class AdminBalanceOperation(models.Model):
+    class OperationType(models.TextChoices):
+        DEPOSIT_ACCRUAL = "deposit_accrual", "Deposit accrual"
+        DEPOSIT_WITHDRAWAL = "deposit_withdrawal", "Deposit withdrawal"
+        VCOINS_INCREASE = "vcoins_increase", "V-Coins increase"
+        VCOINS_DECREASE = "vcoins_decrease", "V-Coins decrease"
+        COMBINED_ADJUSTMENT = "combined_adjustment", "Combined adjustment"
+
+    id = models.AutoField(primary_key=True)
+    member = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="admin_balance_operations",
+    )
+    operation_type = models.CharField(
+        max_length=64,
+        choices=OperationType.choices,
+    )
+    deposit_change = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    vcoins_change = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    balance_deposit_after = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    balance_vcoins_after = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    comment = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        Member,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_admin_balance_operations",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return (
+            f"AdminBalanceOperation(id={self.id}, member={self.member_id}, "
+            f"type={self.operation_type}, deposit_change={self.deposit_change}, "
+            f"vcoins_change={self.vcoins_change})"
+        )
+
+
 class ReferralBonus(models.Model):
     id = models.AutoField(primary_key=True)
     referrer = models.ForeignKey(
