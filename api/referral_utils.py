@@ -20,6 +20,8 @@ from .models import (
     USER_TYPE_INFLUENCER,
     ReferralEvent,
     ReferralReward,
+    WalletTransaction,
+    ReferralBonus,
 )
 
 RewardType = ReferralReward.RewardType
@@ -439,6 +441,90 @@ def process_deposit_for_referrals(deposit: "Deposit") -> ReferralEvent | None:
         deposit.amount,
         created_at=deposit.created_at,
     )
+
+
+def create_spend_referral_bonus(
+    spend_tx: "WalletTransaction",
+) -> ReferralBonus | None:
+    """Create and credit a referral bonus for a wallet SPEND transaction.
+
+    The bonus is paid only to the direct referrer when that referrer is an
+    influencer (user_type == 'influencer'). The bonus amount equals
+    INFLUENCER_DEPOSIT_PERCENT of the spend amount. Idempotent per
+    spend transaction.
+    """
+
+    if spend_tx is None or spend_tx.pk is None:
+        return None
+
+    if spend_tx.type != WalletTransaction.Type.SPEND:
+        return None
+
+    member = spend_tx.member
+    if member is None or member.pk is None:
+        return None
+
+    referrer: Member | None = member.referrer or member.referred_by
+    if referrer is None:
+        return None
+
+    if referrer.user_type != USER_TYPE_INFLUENCER:
+        return None
+
+    # Fast-path idempotency check
+    existing = ReferralBonus.objects.filter(spend_transaction=spend_tx).first()
+    if existing is not None:
+        return existing
+
+    amount = (spend_tx.amount * INFLUENCER_DEPOSIT_PERCENT).quantize(
+        Decimal("0.01")
+    )
+    if amount <= 0:
+        return None
+
+    with transaction.atomic():
+        # Double-check under lock for idempotency
+        existing = (
+            ReferralBonus.objects.select_for_update()
+            .filter(spend_transaction=spend_tx)
+            .first()
+        )
+        if existing is not None:
+            return existing
+
+        # Credit referrer's wallet using a dedicated BONUS transaction
+        referrer._apply_wallet_change(
+            delta=amount,
+            tx_type=WalletTransaction.Type.BONUS,
+            description=(
+                f"Referral bonus from spend transaction #{spend_tx.id} "
+                f"of member {member.id}"
+            ),
+            meta={
+                "source_member_id": member.id,
+                "spend_transaction_id": spend_tx.id,
+            },
+        )
+
+        bonus = ReferralBonus.objects.create(
+            referrer=referrer,
+            referred_member=member,
+            spend_transaction=spend_tx,
+            amount=amount,
+            description=(
+                f"Referral bonus from spend transaction #{spend_tx.id} "
+                f"of member {member.id}"
+            ),
+        )
+
+        money_increment_int = int(amount)
+        if money_increment_int > 0:
+            referrer.total_money_earned = (
+                referrer.total_money_earned or 0
+            ) + money_increment_int
+            referrer.save(update_fields=["total_money_earned"])
+
+        return bonus
 
 
 def simulate_demo_deposits_for_amir_alfira(amount: int | Decimal = 2000) -> dict:

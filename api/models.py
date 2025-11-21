@@ -308,6 +308,12 @@ class Member(models.Model):
                 meta=meta or None,
             )
 
+            # Trigger referral bonus logic for spend transactions
+            if tx_type == WalletTransaction.Type.SPEND:
+                from .referral_utils import create_spend_referral_bonus
+
+                create_spend_referral_bonus(tx)
+
             locked.cash_balance = new_balance
             locked.save(update_fields=["cash_balance"])
 
@@ -606,6 +612,7 @@ class WalletTransaction(models.Model):
         WITHDRAW = "withdraw", "Withdraw"
         REFUND = "refund", "Refund"
         ADJUSTMENT = "adjustment", "Adjustment"
+        BONUS = "bonus", "Referral bonus"
 
     id = models.AutoField(primary_key=True)
     member = models.ForeignKey(
@@ -631,6 +638,38 @@ class WalletTransaction(models.Model):
         return (
             f"WalletTransaction(id={self.id}, member={self.member_id}, "
             f"type={self.type}, amount={self.amount})"
+        )
+
+
+class ReferralBonus(models.Model):
+    id = models.AutoField(primary_key=True)
+    referrer = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="referral_bonuses",
+    )
+    referred_member = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="generated_bonuses",
+    )
+    spend_transaction = models.OneToOneField(
+        "WalletTransaction",
+        on_delete=models.CASCADE,
+        related_name="referral_bonus",
+    )
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    description = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return (
+            f"ReferralBonus(id={self.id}, referrer={self.referrer_id}, "
+            f"referred={self.referred_member_id}, tx={self.spend_transaction_id}, "
+            f"amount={self.amount})"
         )
 
 

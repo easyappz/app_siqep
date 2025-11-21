@@ -24,6 +24,7 @@ from .models import (
     PasswordResetCode,
     ReferralEvent,
     WalletTransaction,
+    ReferralBonus,
 )
 from .referral_utils import (
     get_rank_multiplier,
@@ -31,6 +32,7 @@ from .referral_utils import (
     on_new_user_registered,
     on_user_first_tournament_completed,
     on_member_deposit,
+    create_spend_referral_bonus,
 )
 
 
@@ -112,6 +114,127 @@ class WalletModelTests(TestCase):
         self.assertEqual(
             tx_types,
             [WalletTransaction.Type.DEPOSIT, WalletTransaction.Type.SPEND],
+        )
+
+
+class ReferralBonusOnSpendTests(TestCase):
+    """Tests for referral bonus creation when a referred member spends funds."""
+
+    def setUp(self):
+        self.referrer = Member(
+            first_name="Referrer",
+            last_name="User",
+            phone="+79990007000",
+            email=None,
+            is_influencer=True,
+            is_admin=False,
+            user_type=USER_TYPE_INFLUENCER,
+        )
+        self.referrer.set_password("referrer123")
+        self.referrer.save()
+
+        self.referred = Member(
+            first_name="Referred",
+            last_name="User",
+            phone="+79990007001",
+            email=None,
+            is_influencer=False,
+            is_admin=False,
+            user_type=USER_TYPE_PLAYER,
+            referrer=self.referrer,
+            referred_by=self.referrer,
+        )
+        self.referred.set_password("referred123")
+        self.referred.save()
+
+        # Give referred member initial wallet balance
+        self.referred.deposit(Decimal("500.00"), description="Initial deposit")
+
+    def test_referral_bonus_created_on_spend(self):
+        referrer_balance_before = self.referrer.cash_balance or Decimal("0.00")
+        spend_amount = Decimal("100.00")
+
+        spend_tx = self.referred.spend(spend_amount, description="Spend for test")
+
+        bonus = ReferralBonus.objects.get(spend_transaction=spend_tx)
+        expected_amount = (spend_amount * INFLUENCER_DEPOSIT_PERCENT).quantize(
+            Decimal("0.01")
+        )
+        self.assertEqual(bonus.amount, expected_amount)
+
+        self.referrer.refresh_from_db()
+        self.assertEqual(
+            self.referrer.cash_balance,
+            referrer_balance_before + expected_amount,
+        )
+
+        bonus_tx = WalletTransaction.objects.filter(
+            member=self.referrer,
+            type=WalletTransaction.Type.BONUS,
+            meta__spend_transaction_id=spend_tx.id,
+        ).first()
+        self.assertIsNotNone(bonus_tx)
+        self.assertEqual(bonus_tx.amount, expected_amount)
+
+    def test_create_spend_referral_bonus_is_idempotent_for_same_transaction(self):
+        spend_amount = Decimal("50.00")
+        spend_tx = self.referred.spend(spend_amount, description="First spend")
+
+        self.assertEqual(
+            ReferralBonus.objects.filter(spend_transaction=spend_tx).count(),
+            1,
+        )
+        bonus_before = ReferralBonus.objects.get(spend_transaction=spend_tx)
+        referrer_balance_before = self.referrer.cash_balance or Decimal("0.00")
+
+        # Call helper explicitly a second time for the same transaction
+        create_spend_referral_bonus(spend_tx)
+
+        self.assertEqual(
+            ReferralBonus.objects.filter(spend_transaction=spend_tx).count(),
+            1,
+        )
+        bonus_after = ReferralBonus.objects.get(spend_transaction=spend_tx)
+        self.assertEqual(bonus_after.id, bonus_before.id)
+
+        self.referrer.refresh_from_db()
+        self.assertEqual(self.referrer.cash_balance, referrer_balance_before)
+
+    def test_no_bonus_when_referrer_is_not_influencer(self):
+        non_influencer = Member(
+            first_name="NonInfluencer",
+            last_name="User",
+            phone="+79990007002",
+            email=None,
+            is_influencer=False,
+            is_admin=False,
+            user_type=USER_TYPE_PLAYER,
+        )
+        non_influencer.set_password("noninfl123")
+        non_influencer.save()
+
+        referred = Member(
+            first_name="Referred2",
+            last_name="User",
+            phone="+79990007003",
+            email=None,
+            is_influencer=False,
+            is_admin=False,
+            user_type=USER_TYPE_PLAYER,
+            referrer=non_influencer,
+            referred_by=non_influencer,
+        )
+        referred.set_password("referred234")
+        referred.save()
+
+        referred.deposit(Decimal("100.00"), description="Initial deposit")
+        spend_tx = referred.spend(
+            Decimal("50.00"),
+            description="Spend with non-influencer referrer",
+        )
+
+        self.assertFalse(
+            ReferralBonus.objects.filter(spend_transaction=spend_tx).exists()
         )
 
 
@@ -1010,7 +1133,7 @@ class AdminResetMemberPasswordAPITests(TestCase):
         )
         self.assertEqual(login_response_new.status_code, 200)
 
-        # Old password should fail
+        # Login with old password should fail
         login_response_old = login_client.post(
             "/api/auth/login/",
             {"phone": self.member.phone, "password": "userold123"},

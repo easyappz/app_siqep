@@ -7,6 +7,7 @@ from .models import (
     ReferralRelation,
     RankRule,
     WalletTransaction,
+    ReferralBonus,
 )
 
 
@@ -143,5 +144,27 @@ class WalletTransactionAdmin(admin.ModelAdmin):
         "meta",
         "created_at",
         "updated_at",
+    )
+    ordering = ("-created_at",)
+
+
+@admin.register(ReferralBonus)
+class ReferralBonusAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "referrer",
+        "referred_member",
+        "spend_transaction",
+        "amount",
+        "created_at",
+    )
+    list_filter = ("created_at",)
+    search_fields = (
+        "referrer__first_name",
+        "referrer__last_name",
+        "referrer__phone",
+        "referred_member__first_name",
+        "referred_member__last_name",
+        "referred_member__phone",
     )
     ordering = ("-created_at",)
