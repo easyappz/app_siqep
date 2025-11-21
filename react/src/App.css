@@ -1618,3 +1618,205 @@
     justify-content: flex-start;
   }
 }
+
+/* Profile forms shared styles */
+
+.profile-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+}
+
+.profile-input,
+.profile-textarea,
+.profile-select {
+  width: 100%;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(148, 163, 184, 0.7);
+  padding: 0.6rem 0.8rem;
+  background: rgba(15, 23, 42, 0.9);
+  color: #f9fafb;
+  font-size: 0.9rem;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.profile-input:focus,
+.profile-textarea:focus,
+.profile-select:focus {
+  border-color: rgba(129, 140, 248, 0.9);
+  box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.7);
+}
+
+.profile-textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.profile-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.profile-section-subtitle {
+  font-size: 1rem;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.profile-status-success {
+  background: rgba(22, 101, 52, 0.9);
+  border-color: rgba(74, 222, 128, 0.7);
+  color: #dcfce7;
+}
+
+.profile-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.profile-radio-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.profile-withdraw-history {
+  margin-top: 1.25rem;
+}
+
+.profile-withdraw-empty {
+  font-size: 0.9rem;
+  color: #e5e7eb;
+  padding: 0.5rem 0.25rem;
+}
+
+.profile-withdraw-table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  background: rgba(15, 23, 42, 0.9);
+}
+
+.profile-withdraw-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 480px;
+  font-size: 0.85rem;
+}
+
+.profile-withdraw-table thead tr {
+  background: rgba(15, 23, 42, 0.95);
+}
+
+.profile-withdraw-table th,
+.profile-withdraw-table td {
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(30, 64, 175, 0.6);
+}
+
+.profile-withdraw-table th {
+  font-weight: 500;
+  color: #e5e7eb;
+}
+
+.profile-withdraw-table tbody tr:nth-child(even) {
+  background: rgba(15, 23, 42, 0.9);
+}
+
+.profile-withdraw-table tbody tr:hover {
+  background: rgba(30, 64, 175, 0.7);
+}
+
+/* Wallet section */
+
+.profile-wallet-card {
+  margin-bottom: 1.75rem;
+}
+
+.profile-wallet-status {
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  color: #e5e7eb;
+}
+
+.profile-wallet-summary-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.profile-wallet-summary-card {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 1rem 1rem 1.1rem;
+  border-radius: 0.9rem;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.6);
+}
+
+.profile-wallet-balance-value {
+  font-size: 1.6rem;
+  font-weight: 600;
+  margin: 0.25rem 0 0.4rem;
+}
+
+.profile-wallet-summary-value {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 0.2rem 0 0.35rem;
+}
+
+.profile-wallet-forms {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+  margin-top: 1.5rem;
+}
+
+.profile-wallet-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.profile-wallet-form-inner {
+  margin-top: 0.35rem;
+}
+
+.profile-wallet-inline-help {
+  font-size: 0.85rem;
+  color: #d1d5db;
+}
+
+.profile-wallet-transactions {
+  margin-top: 1.5rem;
+}
+
+.profile-wallet-transactions-pagination {
+  margin-top: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  color: #d1d5db;
+}
+
+.profile-wallet-transactions-pagination-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+@media (max-width: 768px) {
+  .profile-wallet-forms {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

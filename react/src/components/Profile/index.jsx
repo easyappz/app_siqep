@@ -15,6 +15,12 @@ import { getProfile, fetchProfileStats, updateProfile } from '../../api/profile'
 import { fetchReferralTree, fetchReferralRewards } from '../../api/referrals';
 import { createWithdrawalRequest, getMyWithdrawalRequests } from '../../api/withdrawals';
 import { changePassword } from '../../api/auth';
+import {
+  getWalletSummary,
+  getWalletTransactions,
+  createWalletDeposit,
+  createWalletSpend,
+} from '../../api/wallet';
 
 function getUserTypeFromMember(member) {
   if (!member) {
@@ -130,6 +136,31 @@ const ProfilePage = () => {
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [changePasswordErrors, setChangePasswordErrors] = useState({});
   const [changePasswordSuccess, setChangePasswordSuccess] = useState('');
+
+  const [walletSummary, setWalletSummary] = useState(null);
+  const [walletLoading, setWalletLoading] = useState(false);
+  const [walletError, setWalletError] = useState('');
+
+  const [walletTransactions, setWalletTransactions] = useState([]);
+  const [walletTransactionsLoading, setWalletTransactionsLoading] = useState(false);
+  const [walletTransactionsError, setWalletTransactionsError] = useState('');
+  const [walletTransactionsPage, setWalletTransactionsPage] = useState(1);
+  const [walletTransactionsHasNext, setWalletTransactionsHasNext] = useState(false);
+  const [walletTransactionsHasPrev, setWalletTransactionsHasPrev] = useState(false);
+  const [walletTransactionsTotalCount, setWalletTransactionsTotalCount] = useState(null);
+
+  const [walletDepositAmount, setWalletDepositAmount] = useState('');
+  const [walletDepositComment, setWalletDepositComment] = useState('');
+  const [walletDepositError, setWalletDepositError] = useState('');
+  const [walletDepositSuccess, setWalletDepositSuccess] = useState('');
+  const [isSubmittingDeposit, setIsSubmittingDeposit] = useState(false);
+
+  const [walletSpendAmount, setWalletSpendAmount] = useState('');
+  const [walletSpendDescription, setWalletSpendDescription] = useState('');
+  const [walletSpendCategory, setWalletSpendCategory] = useState('');
+  const [walletSpendError, setWalletSpendError] = useState('');
+  const [walletSpendSuccess, setWalletSpendSuccess] = useState('');
+  const [isSubmittingSpend, setIsSubmittingSpend] = useState(false);
 
   const handleCopyLink = async (link) => {
     if (!link) {
@@ -268,6 +299,107 @@ const ProfilePage = () => {
     }
   }, [logout, navigate]);
 
+  const loadWalletSummary = useCallback(async () => {
+    setWalletLoading(true);
+    setWalletError('');
+
+    try {
+      const data = await getWalletSummary();
+      setWalletSummary(data || null);
+    } catch (err) {
+      const statusCode = err && err.response ? err.response.status : null;
+
+      if (statusCode === 401) {
+        logout();
+        navigate('/login', { replace: true });
+        return;
+      }
+
+      let message = 'Не удалось загрузить данные кошелька. Попробуйте ещё раз.';
+
+      if (err && err.response && err.response.data) {
+        const responseData = err.response.data;
+        if (typeof responseData.detail === 'string') {
+          message = responseData.detail;
+        } else if (typeof responseData.error === 'string') {
+          message = responseData.error;
+        } else if (typeof responseData.message === 'string') {
+          message = responseData.message;
+        }
+      }
+
+      setWalletError(message);
+    } finally {
+      setWalletLoading(false);
+    }
+  }, [logout, navigate]);
+
+  const loadWalletTransactions = useCallback(
+    async (page = 1) => {
+      setWalletTransactionsLoading(true);
+      setWalletTransactionsError('');
+
+      try {
+        const data = await getWalletTransactions({ page });
+
+        let items = [];
+        let count = null;
+        let next = null;
+        let previous = null;
+
+        if (Array.isArray(data)) {
+          items = data;
+          count = data.length;
+        } else if (data && Array.isArray(data.results)) {
+          items = data.results;
+          count = typeof data.count === 'number' ? data.count : null;
+          next = data.next;
+          previous = data.previous;
+        } else if (data && Array.isArray(data.items)) {
+          items = data.items;
+          count = typeof data.count === 'number' ? data.count : data.items.length;
+          next = data.next;
+          previous = data.previous;
+        }
+
+        setWalletTransactions(items);
+        setWalletTransactionsPage(page);
+        setWalletTransactionsTotalCount(
+          typeof count === 'number' ? count : items.length,
+        );
+        setWalletTransactionsHasNext(Boolean(next));
+        setWalletTransactionsHasPrev(Boolean(previous));
+      } catch (err) {
+        const statusCode = err && err.response ? err.response.status : null;
+
+        if (statusCode === 401) {
+          logout();
+          navigate('/login', { replace: true });
+          return;
+        }
+
+        let message =
+          'Не удалось загрузить историю операций кошелька. Попробуйте ещё раз.';
+
+        if (err && err.response && err.response.data) {
+          const responseData = err.response.data;
+          if (typeof responseData.detail === 'string') {
+            message = responseData.detail;
+          } else if (typeof responseData.error === 'string') {
+            message = responseData.error;
+          } else if (typeof responseData.message === 'string') {
+            message = responseData.message;
+          }
+        }
+
+        setWalletTransactionsError(message);
+      } finally {
+        setWalletTransactionsLoading(false);
+      }
+    },
+    [logout, navigate],
+  );
+
   useEffect(() => {
     loadProfile();
     loadStats();
@@ -277,6 +409,11 @@ const ProfilePage = () => {
     loadReferralTree();
     loadReferralRewards();
   }, [loadReferralTree, loadReferralRewards]);
+
+  useEffect(() => {
+    loadWalletSummary();
+    loadWalletTransactions(1);
+  }, [loadWalletSummary, loadWalletTransactions]);
 
   useEffect(() => {
     if (profileData) {
@@ -420,6 +557,21 @@ const ProfilePage = () => {
     Boolean(profileUser && profileUser.is_influencer) ||
     Number(totalInfluencerEarningsValue) > 0;
 
+  const walletBalance =
+    walletSummary && typeof walletSummary.balance !== 'undefined'
+      ? walletSummary.balance
+      : 0;
+
+  const walletTotalDeposited =
+    walletSummary && typeof walletSummary.total_deposited !== 'undefined'
+      ? walletSummary.total_deposited
+      : 0;
+
+  const walletTotalSpent =
+    walletSummary && typeof walletSummary.total_spent !== 'undefined'
+      ? walletSummary.total_spent
+      : 0;
+
   const handleRetry = () => {
     loadProfile();
     loadStats();
@@ -538,6 +690,194 @@ const ProfilePage = () => {
     }
   };
 
+  const buildWalletErrorMessage = (error, defaultMessage, insufficientMessage) => {
+    let message = defaultMessage;
+    const response = error && error.response ? error.response : null;
+
+    if (response && response.data) {
+      const responseData = response.data;
+      if (typeof responseData.detail === 'string') {
+        message = responseData.detail;
+      } else if (typeof responseData.error === 'string') {
+        message = responseData.error;
+      } else if (typeof responseData.message === 'string') {
+        message = responseData.message;
+      } else if (
+        Array.isArray(responseData.non_field_errors) &&
+        responseData.non_field_errors.length > 0
+      ) {
+        message = String(responseData.non_field_errors[0]);
+      }
+    }
+
+    if (insufficientMessage && response && response.status === 400) {
+      const responseData = response.data || {};
+
+      if (responseData && responseData.code === 'insufficient_funds') {
+        return insufficientMessage;
+      }
+
+      const parts = [];
+
+      if (responseData && typeof responseData.detail === 'string') {
+        parts.push(responseData.detail);
+      }
+      if (responseData && typeof responseData.error === 'string') {
+        parts.push(responseData.error);
+      }
+      if (responseData && typeof responseData.message === 'string') {
+        parts.push(responseData.message);
+      }
+
+      const combined = parts.join(' ').toLowerCase();
+
+      if (
+        combined.indexOf('insufficient') !== -1 ||
+        combined.indexOf('недостаточно') !== -1
+      ) {
+        message = insufficientMessage;
+      }
+    }
+
+    return message;
+  };
+
+  const handleWalletDepositSubmit = async (event) => {
+    if (event && event.preventDefault) {
+      event.preventDefault();
+    }
+
+    setWalletDepositError('');
+    setWalletDepositSuccess('');
+
+    const amountNumber = Number(walletDepositAmount);
+
+    if (!walletDepositAmount || Number.isNaN(amountNumber) || amountNumber <= 0) {
+      setWalletDepositError('Сумма должна быть положительным числом.');
+      return;
+    }
+
+    setIsSubmittingDeposit(true);
+
+    try {
+      const payload = {
+        amount: amountNumber,
+      };
+
+      if (walletDepositComment) {
+        payload.description = walletDepositComment;
+      }
+
+      await createWalletDeposit(payload);
+
+      setWalletDepositSuccess('Баланс успешно пополнен.');
+      setWalletDepositAmount('');
+      setWalletDepositComment('');
+
+      await loadWalletSummary();
+      await loadWalletTransactions(1);
+    } catch (error) {
+      const response = error && error.response ? error.response : null;
+
+      if (response && response.status === 401) {
+        logout();
+        navigate('/login', { replace: true });
+        return;
+      }
+
+      const message = buildWalletErrorMessage(
+        error,
+        'Не удалось пополнить баланс. Попробуйте ещё раз.',
+        null,
+      );
+
+      setWalletDepositError(message);
+    } finally {
+      setIsSubmittingDeposit(false);
+    }
+  };
+
+  const handleWalletSpendSubmit = async (event) => {
+    if (event && event.preventDefault) {
+      event.preventDefault();
+    }
+
+    setWalletSpendError('');
+    setWalletSpendSuccess('');
+
+    const amountNumber = Number(walletSpendAmount);
+
+    if (!walletSpendAmount || Number.isNaN(amountNumber) || amountNumber <= 0) {
+      setWalletSpendError('Сумма должна быть положительным числом.');
+      return;
+    }
+
+    if (!walletSpendDescription) {
+      setWalletSpendError('Укажите описание операции, за что списываются средства.');
+      return;
+    }
+
+    setIsSubmittingSpend(true);
+
+    try {
+      const payload = {
+        amount: amountNumber,
+        description: walletSpendDescription,
+      };
+
+      if (walletSpendCategory) {
+        payload.category = walletSpendCategory;
+      }
+
+      await createWalletSpend(payload);
+
+      setWalletSpendSuccess('Списание успешно выполнено.');
+      setWalletSpendAmount('');
+      setWalletSpendDescription('');
+      setWalletSpendCategory('');
+
+      await loadWalletSummary();
+      await loadWalletTransactions(1);
+    } catch (error) {
+      const response = error && error.response ? error.response : null;
+
+      if (response && response.status === 401) {
+        logout();
+        navigate('/login', { replace: true });
+        return;
+      }
+
+      const message = buildWalletErrorMessage(
+        error,
+        'Не удалось списать средства. Попробуйте ещё раз.',
+        'Недостаточно средств на кошельке.',
+      );
+
+      setWalletSpendError(message);
+    } finally {
+      setIsSubmittingSpend(false);
+    }
+  };
+
+  const handleWalletPrevPage = () => {
+    if (walletTransactionsLoading || !walletTransactionsHasPrev) {
+      return;
+    }
+
+    const previousPage =
+      walletTransactionsPage > 1 ? walletTransactionsPage - 1 : 1;
+    loadWalletTransactions(previousPage);
+  };
+
+  const handleWalletNextPage = () => {
+    if (walletTransactionsLoading || !walletTransactionsHasNext) {
+      return;
+    }
+
+    const nextPage = walletTransactionsPage + 1;
+    loadWalletTransactions(nextPage);
+  };
+
   const formatRewardTypeLabel = (rewardType) => {
     if (rewardType === 'PLAYER_STACK') {
       return 'Бесплатный стартовый стек';
@@ -610,6 +950,22 @@ const ProfilePage = () => {
       return 'Выплачена';
     }
     return 'Статус неизвестен';
+  };
+
+  const formatTransactionTypeLabel = (type) => {
+    if (type === 'deposit') {
+      return 'Пополнение';
+    }
+    if (type === 'spend') {
+      return 'Списание';
+    }
+    if (type === 'bonus') {
+      return 'Бонус';
+    }
+    if (!type) {
+      return 'Операция';
+    }
+    return 'Другая операция';
   };
 
   const rewardDescriptionLines =
@@ -848,6 +1204,310 @@ const ProfilePage = () => {
             </form>
           </section>
         </div>
+
+        <section className="card profile-wallet-card">
+          <h2 className="profile-section-title">Кошелёк игрока</h2>
+          <p className="profile-section-text">
+            Внутренний кошелёк для управления средствами внутри клуба. Вы можете
+            пополнить баланс, оплачивать из него участие в играх и видеть историю
+            всех операций.
+          </p>
+
+          {walletLoading && !walletError && (
+            <div className="profile-wallet-status">Загрузка данных кошелька...</div>
+          )}
+
+          {walletError && (
+            <div className="profile-status-message profile-status-error">
+              {walletError}
+            </div>
+          )}
+
+          {!walletError && (
+            <>
+              <div className="profile-wallet-summary-grid">
+                <div className="profile-wallet-summary-card">
+                  <div className="profile-stat-label">Текущий баланс</div>
+                  <div className="profile-wallet-balance-value">{`${walletBalance} ₽`}</div>
+                  <div className="profile-stat-caption">
+                    Средства, доступные для игр и оплат внутри клуба.
+                  </div>
+                </div>
+
+                <div className="profile-wallet-summary-card">
+                  <div className="profile-stat-label">Всего пополнено</div>
+                  <div className="profile-wallet-summary-value">{`${walletTotalDeposited} ₽`}</div>
+                  <div className="profile-stat-caption">
+                    Суммарная сумма всех пополнений кошелька за всё время.
+                  </div>
+                </div>
+
+                <div className="profile-wallet-summary-card">
+                  <div className="profile-stat-label">Всего списано</div>
+                  <div className="profile-wallet-summary-value">{`${walletTotalSpent} ₽`}</div>
+                  <div className="profile-stat-caption">
+                    Сумма всех оплат и внутренних списаний из кошелька.
+                  </div>
+                </div>
+              </div>
+
+              <div className="profile-wallet-forms">
+                <div className="profile-wallet-form">
+                  <h3 className="profile-section-subtitle">Пополнить баланс</h3>
+                  <p className="profile-wallet-inline-help">
+                    Введите сумму пополнения и при необходимости комментарий. Пополнение
+                    производится в рублях.
+                  </p>
+
+                  <form
+                    className="profile-wallet-form-inner"
+                    onSubmit={handleWalletDepositSubmit}
+                  >
+                    <div className="profile-form-row">
+                      <label className="profile-label" htmlFor="walletDepositAmount">
+                        Сумма (₽)
+                      </label>
+                      <input
+                        id="walletDepositAmount"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="profile-input"
+                        value={walletDepositAmount}
+                        onChange={(event) => setWalletDepositAmount(event.target.value)}
+                        placeholder="Например: 500"
+                      />
+                    </div>
+
+                    <div className="profile-form-row">
+                      <label className="profile-label" htmlFor="walletDepositComment">
+                        Комментарий (опционально)
+                      </label>
+                      <textarea
+                        id="walletDepositComment"
+                        className="profile-textarea"
+                        rows={2}
+                        value={walletDepositComment}
+                        onChange={(event) => setWalletDepositComment(event.target.value)}
+                        placeholder="Например: пополнение перед игрой"
+                      />
+                    </div>
+
+                    {walletDepositError && (
+                      <div className="profile-status-message profile-status-error">
+                        {walletDepositError}
+                      </div>
+                    )}
+
+                    {walletDepositSuccess && (
+                      <div className="profile-status-message profile-status-success">
+                        {walletDepositSuccess}
+                      </div>
+                    )}
+
+                    <div className="profile-form-actions">
+                      <button
+                        type="submit"
+                        className="btn btn-primary"
+                        disabled={isSubmittingDeposit}
+                      >
+                        {isSubmittingDeposit ? 'Обработка...' : 'Пополнить баланс'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                <div className="profile-wallet-form">
+                  <h3 className="profile-section-subtitle">Списать средства</h3>
+                  <p className="profile-wallet-inline-help">
+                    Укажите сумму и описание операции (за что списываются средства). При
+                    недостатке средств операция будет отклонена.
+                  </p>
+
+                  <form
+                    className="profile-wallet-form-inner"
+                    onSubmit={handleWalletSpendSubmit}
+                  >
+                    <div className="profile-form-row">
+                      <label className="profile-label" htmlFor="walletSpendAmount">
+                        Сумма (₽)
+                      </label>
+                      <input
+                        id="walletSpendAmount"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="profile-input"
+                        value={walletSpendAmount}
+                        onChange={(event) => setWalletSpendAmount(event.target.value)}
+                        placeholder="Например: 300"
+                      />
+                    </div>
+
+                    <div className="profile-form-row">
+                      <label className="profile-label" htmlFor="walletSpendDescription">
+                        Описание операции
+                      </label>
+                      <input
+                        id="walletSpendDescription"
+                        type="text"
+                        className="profile-input"
+                        value={walletSpendDescription}
+                        onChange={(event) => setWalletSpendDescription(event.target.value)}
+                        placeholder="Например: взнос за турнир"
+                      />
+                    </div>
+
+                    <div className="profile-form-row">
+                      <label className="profile-label" htmlFor="walletSpendCategory">
+                        Категория (опционально)
+                      </label>
+                      <input
+                        id="walletSpendCategory"
+                        type="text"
+                        className="profile-input"
+                        value={walletSpendCategory}
+                        onChange={(event) => setWalletSpendCategory(event.target.value)}
+                        placeholder="Например: игра, сервис, другое"
+                      />
+                    </div>
+
+                    {walletSpendError && (
+                      <div className="profile-status-message profile-status-error">
+                        {walletSpendError}
+                      </div>
+                    )}
+
+                    {walletSpendSuccess && (
+                      <div className="profile-status-message profile-status-success">
+                        {walletSpendSuccess}
+                      </div>
+                    )}
+
+                    <div className="profile-form-actions">
+                      <button
+                        type="submit"
+                        className="btn btn-secondary"
+                        disabled={isSubmittingSpend}
+                      >
+                        {isSubmittingSpend ? 'Обработка...' : 'Списать средства'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+
+              <div className="profile-wallet-transactions">
+                <h3 className="profile-section-subtitle">История операций</h3>
+
+                {walletTransactionsLoading && (
+                  <div className="profile-wallet-status">
+                    Загрузка истории операций...
+                  </div>
+                )}
+
+                {walletTransactionsError && !walletTransactionsLoading && (
+                  <div className="profile-status-message profile-status-error">
+                    {walletTransactionsError}
+                  </div>
+                )}
+
+                {!walletTransactionsLoading && !walletTransactionsError && (
+                  walletTransactions.length === 0 ? (
+                    <div className="profile-history-empty">
+                      Операции с кошельком пока не выполнялись.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="profile-history-table-wrapper">
+                        <table className="profile-history-table">
+                          <thead>
+                            <tr>
+                              <th>Дата</th>
+                              <th>Тип операции</th>
+                              <th>Сумма</th>
+                              <th>Описание</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {walletTransactions.map((transaction, index) => {
+                              const key = transaction.id || index;
+                              const typeLabel = formatTransactionTypeLabel(
+                                transaction.type,
+                              );
+
+                              const amountValue =
+                                typeof transaction.amount === 'number' ||
+                                typeof transaction.amount === 'string'
+                                  ? transaction.amount
+                                  : 0;
+
+                              let amountText = `${amountValue} ₽`;
+
+                              if (transaction.type === 'spend' && amountValue > 0) {
+                                amountText = `-${amountValue} ₽`;
+                              }
+                              if (transaction.type === 'deposit' && amountValue > 0) {
+                                amountText = `+${amountValue} ₽`;
+                              }
+
+                              const descriptionText =
+                                transaction.description || transaction.comment || '—';
+
+                              const dateText = formatRewardDateTime(
+                                transaction.created_at || transaction.date,
+                              );
+
+                              return (
+                                <tr key={key}>
+                                  <td>{dateText}</td>
+                                  <td>{typeLabel}</td>
+                                  <td>{amountText}</td>
+                                  <td>{descriptionText}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="profile-wallet-transactions-pagination">
+                        <span>
+                          Страница {walletTransactionsPage}
+                          {walletTransactionsTotalCount
+                            ? ` • Всего операций: ${walletTransactionsTotalCount}`
+                            : ''}
+                        </span>
+                        <div className="profile-wallet-transactions-pagination-actions">
+                          <button
+                            type="button"
+                            className="btn btn-outline"
+                            onClick={handleWalletPrevPage}
+                            disabled={
+                              !walletTransactionsHasPrev || walletTransactionsLoading
+                            }
+                          >
+                            Предыдущая
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-outline"
+                            onClick={handleWalletNextPage}
+                            disabled={
+                              !walletTransactionsHasNext || walletTransactionsLoading
+                            }
+                          >
+                            Следующая
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )
+                )}
+              </div>
+            </>
+          )}
+        </section>
 
         <section className="card profile-referral-card">
           <h2 className="profile-section-title">Реферальная программа</h2>
