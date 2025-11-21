@@ -23,8 +23,6 @@ from .views import (
     AdminResetMemberPasswordView,
     AdminReferralEventListView,
     AdminStatsOverviewView,
-    TestSimulateDepositsView,
-    SimulateDemoDepositsView,
     WalletAdminDebitView,
 )
 
@@ -121,16 +119,5 @@ urlpatterns = [
         "admin/wallet/debit/",
         WalletAdminDebitView.as_view(),
         name="admin-wallet-debit",
-    ),
-    # Test-only endpoints
-    path(
-        "test/simulate-deposits/",
-        TestSimulateDepositsView.as_view(),
-        name="test-simulate-deposits",
-    ),
-    path(
-        "test/simulate_demo_deposits/",
-        SimulateDemoDepositsView.as_view(),
-        name="simulate-demo-deposits",
     ),
 ]
