@@ -47,7 +47,7 @@ const LoginPage = () => {
       login(token, member);
 
       if (member && member.is_admin) {
-        navigate('/admin/overview');
+        navigate('/react-admin/overview');
       } else {
         navigate('/profile');
       }

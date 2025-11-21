@@ -51,11 +51,11 @@ function App() {
         '/register',
         '/profile',
         '/password-reset',
-        '/admin',
-        '/admin/overview',
-        '/admin/users',
-        '/admin/wallet',
-        '/admin/referrals',
+        '/react-admin',
+        '/react-admin/overview',
+        '/react-admin/users',
+        '/react-admin/wallet',
+        '/react-admin/referrals',
       ]);
     }
   }, []);
@@ -80,7 +80,7 @@ function App() {
             />
 
             <Route
-              path="/admin"
+              path="/react-admin"
               element={
                 <AdminRoute>
                   <AdminLayout />
