@@ -1064,3 +1064,226 @@ class AdminResetMemberPasswordAPITests(TestCase):
         self.assertEqual(response.status_code, 404)
         data = response.json()
         self.assertEqual(data.get("detail"), "Пользователь не найден.")
+
+
+class RegistrationReferralAPITests(TestCase):
+    """Tests for registration flow with referral codes and influencer crediting."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.url = "/api/auth/register/"
+
+        # Create an influencer with a guaranteed referral code
+        self.influencer = Member(
+            first_name="Influencer",
+            last_name="Test",
+            phone="+79990006000",
+            email=None,
+            is_influencer=True,
+            is_admin=False,
+            user_type=USER_TYPE_INFLUENCER,
+        )
+        self.influencer.set_password("influencer123")
+        self.influencer.save()
+        self.assertIsNotNone(self.influencer.referral_code)
+        self.assertNotEqual(self.influencer.referral_code, "")
+
+    def test_registration_with_valid_referral_code_creates_links_and_relations(self):
+        payload = {
+            "first_name": "Player",
+            "last_name": "Referred",
+            "phone": "+79990006001",
+            "email": None,
+            "password": "player123",
+            "referral_code": self.influencer.referral_code,
+        }
+
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+
+        self.assertIn("member", data)
+        member_data = data["member"]
+        self.assertEqual(member_data["phone"], payload["phone"])
+
+        new_member = Member.objects.get(phone=payload["phone"])
+        self.assertEqual(new_member.referred_by_id, self.influencer.id)
+        self.assertEqual(new_member.referrer_id, self.influencer.id)
+
+        # ReferralEvent should be created for analytics
+        events_qs = ReferralEvent.objects.filter(
+            referrer=self.influencer,
+            referred=new_member,
+            deposit_amount=1000,
+        )
+        self.assertEqual(events_qs.count(), 1)
+
+        # Ranked referral relation should be created (level 1 descendant)
+        self.assertTrue(
+            ReferralRelation.objects.filter(
+                ancestor=self.influencer,
+                descendant=new_member,
+                level=1,
+            ).exists()
+        )
+
+    def test_registration_without_referral_code_creates_member_without_referrer(self):
+        payload = {
+            "first_name": "Player",
+            "last_name": "NoRef",
+            "phone": "+79990006002",
+            "email": None,
+            "password": "player123",
+        }
+
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, 201)
+
+        new_member = Member.objects.get(phone=payload["phone"])
+        self.assertIsNone(new_member.referred_by)
+        self.assertIsNone(new_member.referrer)
+
+        # No referral events or relations should exist for this member
+        self.assertFalse(
+            ReferralEvent.objects.filter(referred=new_member).exists()
+        )
+        self.assertFalse(
+            ReferralRelation.objects.filter(descendant=new_member).exists()
+        )
+
+    def test_registration_with_invalid_referral_code_ignores_code_and_creates_member(self):
+        payload = {
+            "first_name": "Player",
+            "last_name": "InvalidRefCode",
+            "phone": "+79990006003",
+            "email": None,
+            "password": "player123",
+            "referral_code": "NON_EXISTENT_CODE",
+        }
+
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, 201)
+
+        new_member = Member.objects.get(phone=payload["phone"])
+        self.assertIsNone(new_member.referred_by)
+        self.assertIsNone(new_member.referrer)
+
+        self.assertFalse(
+            ReferralEvent.objects.filter(referred=new_member).exists()
+        )
+        self.assertFalse(
+            ReferralRelation.objects.filter(descendant=new_member).exists()
+        )
+
+
+class AdminResetMemberPasswordAPITests(TestCase):
+    """Tests for admin-only member password reset endpoint."""
+
+    def setUp(self):
+        self.client = APIClient()
+
+        self.admin = Member(
+            first_name="Admin",
+            last_name="User",
+            phone="+79990003333",
+            email="admin@example.com",
+            is_influencer=False,
+            is_admin=True,
+        )
+        self.admin.set_password("adminpass123")
+        self.admin.save()
+
+        self.member = Member(
+            first_name="Target",
+            last_name="User",
+            phone="+79990004444",
+            email="target@example.com",
+            is_influencer=False,
+            is_admin=False,
+        )
+        self.member.set_password("userold123")
+        self.member.save()
+
+        token = MemberAuthToken.create_for_member(self.admin)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+    def test_admin_reset_with_provided_password(self):
+        url = f"/api/admin/members/{self.member.id}/reset-password/"
+        new_password = "AdminNew123"
+
+        response = self.client.post(
+            url,
+            {"new_password": new_password},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(
+            data.get("detail"),
+            "Пароль пользователя успешно сброшен администратором.",
+        )
+        self.assertEqual(data.get("generated_password"), new_password)
+
+        # Login with new password should succeed
+        login_client = APIClient()
+        login_response_new = login_client.post(
+            "/api/auth/login/",
+            {"phone": self.member.phone, "password": new_password},
+            format="json",
+        )
+        self.assertEqual(login_response_new.status_code, 200)
+
+        # Old password should fail
+        login_response_old = login_client.post(
+            "/api/auth/login/",
+            {"phone": self.member.phone, "password": "userold123"},
+            format="json",
+        )
+        self.assertEqual(login_response_old.status_code, 400)
+
+    def test_admin_reset_with_generated_password(self):
+        url = f"/api/admin/members/{self.member.id}/reset-password/"
+
+        response = self.client.post(url, {}, format="json")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        generated_password = data.get("generated_password")
+
+        self.assertIsNotNone(generated_password)
+        self.assertGreaterEqual(len(generated_password), 6)
+
+        # Login with generated password should succeed
+        login_client = APIClient()
+        login_response = login_client.post(
+            "/api/auth/login/",
+            {"phone": self.member.phone, "password": generated_password},
+            format="json",
+        )
+        self.assertEqual(login_response.status_code, 200)
+
+    def test_admin_reset_forbidden_for_non_admin(self):
+        non_admin = Member(
+            first_name="Regular",
+            last_name="User",
+            phone="+79990005555",
+            email="regular@example.com",
+            is_influencer=False,
+            is_admin=False,
+        )
+        non_admin.set_password("regular123")
+        non_admin.save()
+
+        token = MemberAuthToken.create_for_member(non_admin)
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+        url = f"/api/admin/members/{self.member.id}/reset-password/"
+        response = client.post(url, {"new_password": "SomePass123"}, format="json")
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_reset_member_not_found(self):
+        url = "/api/admin/members/999999/reset-password/"
+        response = self.client.post(url, {}, format="json")
+        self.assertEqual(response.status_code, 404)
+        data = response.json()
+        self.assertEqual(data.get("detail"), "Пользователь не найден.")

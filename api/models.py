@@ -237,7 +237,11 @@ class Member(models.Model):
         return f"REF{self.pk}{random_suffix}"
 
     def save(self, *args, **kwargs) -> None:
-        """Ensure a referral_code is generated on first save and influencer_since is set correctly."""
+        """Ensure a referral_code is generated and influencer_since is set correctly.
+
+        - influencer_since is set once when a member becomes an influencer.
+        - referral_code is guaranteed to be non-empty for all persisted members.
+        """
         is_new = self.pk is None
 
         previous = None
@@ -262,8 +266,10 @@ class Member(models.Model):
 
         super().save(*args, **kwargs)
 
-        # Generate referral code only once after primary key is available
-        if is_new and not self.referral_code:
+        # Ensure referral code exists for all members once a primary key is available.
+        # This covers both newly created members and legacy records that might not
+        # have had a code generated previously.
+        if self.pk and not self.referral_code:
             self.referral_code = self.generate_referral_code()
             super().save(update_fields=["referral_code"])
 

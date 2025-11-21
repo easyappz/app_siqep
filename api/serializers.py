@@ -388,15 +388,18 @@ class RegistrationSerializer(serializers.Serializer):
         """Validate referral_code if provided and resolve referrer Member.
 
         Stores resolved referrer in attrs["referrer"] for later use in create().
+        If the code is invalid or no longer exists, registration proceeds
+        without linking to a referrer.
         """
         referral_code = attrs.get("referral_code") or ""
         if referral_code:
             try:
                 referrer = Member.objects.get(referral_code=referral_code)
             except Member.DoesNotExist:
-                raise serializers.ValidationError(
-                    {"referral_code": "Указанный реферальный код не найден."}
-                )
+                # Invalid or outdated codes are ignored to avoid blocking
+                # registration. The member will simply be created without
+                # a referrer.
+                return attrs
             attrs["referrer"] = referrer
         return attrs
 
