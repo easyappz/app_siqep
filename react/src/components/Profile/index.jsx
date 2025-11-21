@@ -12,7 +12,12 @@ import {
 } from 'recharts';
 import { AuthContext, useAuth } from '../../context/AuthContext';
 import { getProfile, fetchProfileStats, updateProfile } from '../../api/profile';
-import { fetchReferralTree, fetchReferralRewards } from '../../api/referrals';
+import {
+  fetchReferralTree,
+  fetchReferralRewards,
+  getReferralBonuses,
+  getReferralDeposits,
+} from '../../api/referrals';
 import { createWithdrawalRequest, getMyWithdrawalRequests } from '../../api/withdrawals';
 import { changePassword } from '../../api/auth';
 import {
@@ -162,6 +167,14 @@ const ProfilePage = () => {
   const [walletSpendSuccess, setWalletSpendSuccess] = useState('');
   const [isSubmittingSpend, setIsSubmittingSpend] = useState(false);
 
+  const [referralBonuses, setReferralBonuses] = useState([]);
+  const [referralBonusesLoading, setReferralBonusesLoading] = useState(false);
+  const [referralBonusesError, setReferralBonusesError] = useState('');
+
+  const [referralDeposits, setReferralDeposits] = useState([]);
+  const [referralDepositsLoading, setReferralDepositsLoading] = useState(false);
+  const [referralDepositsError, setReferralDepositsError] = useState('');
+
   const handleCopyLink = async (link) => {
     if (!link) {
       return;
@@ -273,6 +286,48 @@ const ProfilePage = () => {
       setRewardsError('Не удалось загрузить вознаграждения. Попробуйте позже.');
     } finally {
       setIsLoadingRewards(false);
+    }
+  }, [logout, navigate]);
+
+  const loadReferralBonuses = useCallback(async () => {
+    setReferralBonusesLoading(true);
+    setReferralBonusesError('');
+
+    try {
+      const data = await getReferralBonuses();
+      const list = Array.isArray(data) ? data : [];
+      setReferralBonuses(list);
+    } catch (err) {
+      const statusCode = err && err.response ? err.response.status : null;
+      if (statusCode === 401) {
+        logout();
+        navigate('/login', { replace: true });
+        return;
+      }
+      setReferralBonusesError('Не удалось загрузить реферальные бонусы. Попробуйте позже.');
+    } finally {
+      setReferralBonusesLoading(false);
+    }
+  }, [logout, navigate]);
+
+  const loadReferralDeposits = useCallback(async () => {
+    setReferralDepositsLoading(true);
+    setReferralDepositsError('');
+
+    try {
+      const data = await getReferralDeposits();
+      const list = Array.isArray(data) ? data : [];
+      setReferralDeposits(list);
+    } catch (err) {
+      const statusCode = err && err.response ? err.response.status : null;
+      if (statusCode === 401) {
+        logout();
+        navigate('/login', { replace: true });
+        return;
+      }
+      setReferralDepositsError('Не удалось загрузить депозиты рефералов. Попробуйте позже.');
+    } finally {
+      setReferralDepositsLoading(false);
     }
   }, [logout, navigate]);
 
@@ -416,6 +471,20 @@ const ProfilePage = () => {
   }, [loadWalletSummary, loadWalletTransactions]);
 
   useEffect(() => {
+    loadReferralBonuses();
+    loadReferralDeposits();
+
+    const intervalId = window.setInterval(() => {
+      loadReferralBonuses();
+      loadReferralDeposits();
+    }, 20000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [loadReferralBonuses, loadReferralDeposits]);
+
+  useEffect(() => {
     if (profileData) {
       setBankDetails(profileData.withdrawal_bank_details || '');
       setCryptoWallet(profileData.withdrawal_crypto_wallet || '');
@@ -510,6 +579,16 @@ const ProfilePage = () => {
       ? stats.my_deposits
       : [];
 
+  const referralTotalDepositsAmount =
+    stats && typeof stats.referral_total_deposits_amount === 'number'
+      ? stats.referral_total_deposits_amount
+      : 0;
+
+  const referralTotalBonusesAmount =
+    stats && typeof stats.referral_total_bonuses_amount === 'number'
+      ? stats.referral_total_bonuses_amount
+      : 0;
+
   const rewardsSummary = rewardsData && rewardsData.summary ? rewardsData.summary : null;
 
   const totalStackCount =
@@ -571,6 +650,32 @@ const ProfilePage = () => {
     walletSummary && typeof walletSummary.total_spent !== 'undefined'
       ? walletSummary.total_spent
       : 0;
+
+  const referralBonusesTotalCalculated = referralBonuses.reduce((sum, bonus) => {
+    const value = bonus && (typeof bonus.amount === 'string' || typeof bonus.amount === 'number')
+      ? Number(bonus.amount)
+      : 0;
+    if (Number.isNaN(value)) {
+      return sum;
+    }
+    return sum + value;
+  }, 0);
+
+  const totalReferralBonusesDisplay =
+    referralTotalBonusesAmount || referralBonusesTotalCalculated;
+
+  const referralDepositsTotalCalculated = referralDeposits.reduce((sum, item) => {
+    const value = item && (typeof item.amount === 'string' || typeof item.amount === 'number')
+      ? Number(item.amount)
+      : 0;
+    if (Number.isNaN(value)) {
+      return sum;
+    }
+    return sum + value;
+  }, 0);
+
+  const totalReferralDepositsDisplay =
+    referralTotalDepositsAmount || referralDepositsTotalCalculated;
 
   const handleRetry = () => {
     loadProfile();
@@ -2122,6 +2227,180 @@ const ProfilePage = () => {
                           <td>{formatRewardTypeLabel(reward.reward_type)}</td>
                           <td>{sourceName}</td>
                           <td>{amountText}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )
+          )}
+        </section>
+
+        <section className="card profile-referral-bonuses-card">
+          <h2 className="profile-section-title">Реферальные бонусы</h2>
+          <p className="profile-section-text">
+            Здесь отображаются бонусы, которые вы получили за списания средств из кошельков
+            ваших рефералов. Данные обновляются автоматически с небольшим интервалом.
+          </p>
+
+          <div className="profile-deposits-summary">
+            <p className="profile-deposits-summary-line">
+              Всего бонусов за траты рефералов:{' '}
+              <strong>{`${totalReferralBonusesDisplay} ₽`}</strong>
+            </p>
+          </div>
+
+          {referralBonusesLoading && (
+            <div className="profile-status-message">Загрузка реферальных бонусов...</div>
+          )}
+
+          {referralBonusesError && !referralBonusesLoading && (
+            <div className="profile-status-message profile-status-error">
+              {referralBonusesError}
+            </div>
+          )}
+
+          {!referralBonusesLoading && !referralBonusesError && (
+            referralBonuses.length === 0 ? (
+              <div className="profile-history-empty">
+                Бонусы за траты рефералов пока не начислялись.
+              </div>
+            ) : (
+              <div className="profile-deposits-table-wrapper">
+                <table className="profile-deposits-table">
+                  <thead>
+                    <tr>
+                      <th>Дата</th>
+                      <th>Реферал</th>
+                      <th>Сумма бонуса</th>
+                      <th>Исходная трата</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {referralBonuses.map((bonus, index) => {
+                      const key = bonus.id || index;
+                      const referred = bonus.referred_member || {};
+
+                      const fullNameParts = [];
+                      if (referred.first_name) {
+                        fullNameParts.push(referred.first_name);
+                      }
+                      if (referred.last_name) {
+                        fullNameParts.push(referred.last_name);
+                      }
+                      const fullName = fullNameParts.join(' ');
+                      const phone = referred.phone || '';
+                      const referralDisplay = fullName || phone || 'Реферал';
+
+                      const amountValue =
+                        typeof bonus.amount === 'number' || typeof bonus.amount === 'string'
+                          ? bonus.amount
+                          : 0;
+
+                      const spendAmountValue =
+                        bonus.spend_amount &&
+                        (typeof bonus.spend_amount === 'number' ||
+                          typeof bonus.spend_amount === 'string')
+                          ? bonus.spend_amount
+                          : 0;
+
+                      const amountText = `${amountValue} ₽`;
+                      const spendText = spendAmountValue
+                        ? `${spendAmountValue} ₽`
+                        : '—';
+
+                      const dateText = formatRewardDateTime(bonus.created_at);
+
+                      return (
+                        <tr key={key}>
+                          <td>{dateText}</td>
+                          <td>{referralDisplay}</td>
+                          <td>{amountText}</td>
+                          <td>{spendText}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )
+          )}
+        </section>
+
+        <section className="card profile-referral-deposits-card">
+          <h2 className="profile-section-title">Депозиты ваших рефералов</h2>
+          <p className="profile-section-text">
+            Список депозитов на фишки, которые совершили ваши прямые рефералы. Эти данные
+            помогают отслеживать активность структуры и начисление процентных бонусов.
+          </p>
+
+          <div className="profile-deposits-summary">
+            <p className="profile-deposits-summary-line">
+              Всего депозитов рефералов:{' '}
+              <strong>{`${totalReferralDepositsDisplay} ₽`}</strong>
+            </p>
+          </div>
+
+          {referralDepositsLoading && (
+            <div className="profile-status-message">Загрузка депозитов рефералов...</div>
+          )}
+
+          {referralDepositsError && !referralDepositsLoading && (
+            <div className="profile-status-message profile-status-error">
+              {referralDepositsError}
+            </div>
+          )}
+
+          {!referralDepositsLoading && !referralDepositsError && (
+            referralDeposits.length === 0 ? (
+              <div className="profile-deposits-empty">
+                Ваши рефералы пока не совершали депозитов.
+              </div>
+            ) : (
+              <div className="profile-deposits-table-wrapper">
+                <table className="profile-deposits-table">
+                  <thead>
+                    <tr>
+                      <th>Реферал</th>
+                      <th>Сумма депозита</th>
+                      <th>Валюта</th>
+                      <th>Тестовый</th>
+                      <th>Дата</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {referralDeposits.map((deposit, index) => {
+                      const key = deposit.id || index;
+                      const referred = deposit.member || {};
+
+                      const fullNameParts = [];
+                      if (referred.first_name) {
+                        fullNameParts.push(referred.first_name);
+                      }
+                      if (referred.last_name) {
+                        fullNameParts.push(referred.last_name);
+                      }
+                      const fullName = fullNameParts.join(' ');
+                      const phone = referred.phone || '';
+                      const referralDisplay = fullName || phone || 'Реферал';
+
+                      const amountText =
+                        typeof deposit.amount === 'number' || typeof deposit.amount === 'string'
+                          ? `${deposit.amount} ₽`
+                          : '—';
+
+                      const currencyText = deposit.currency || 'RUB';
+                      const isTest = Boolean(deposit.is_test);
+                      const dateText = formatRewardDateTime(deposit.created_at);
+
+                      return (
+                        <tr key={key}>
+                          <td>{referralDisplay}</td>
+                          <td>{amountText}</td>
+                          <td>{currencyText}</td>
+                          <td>{isTest ? 'Да' : 'Нет'}</td>
+                          <td>{dateText}</td>
                         </tr>
                       );
                     })}
