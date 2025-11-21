@@ -43,7 +43,7 @@ const MainLayout = ({ children }) => {
 
             {isAdmin && (
               <NavLink
-                to="/react-admin/overview"
+                to="/admin/overview"
                 className={({ isActive }) =>
                   `layout-nav-link${isActive ? ' active' : ''}`
                 }

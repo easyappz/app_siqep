@@ -51,6 +51,13 @@ function App() {
         '/register',
         '/profile',
         '/password-reset',
+        // Админ-маршруты (новые короткие пути)
+        '/admin',
+        '/admin/overview',
+        '/admin/users',
+        '/admin/wallet',
+        '/admin/referrals',
+        // Админ-маршруты (старые пути для обратной совместимости)
         '/react-admin',
         '/react-admin/overview',
         '/react-admin/users',
@@ -79,6 +86,23 @@ function App() {
               }
             />
 
+            {/* Новый основной префикс админ-панели */}
+            <Route
+              path="/admin"
+              element={
+                <AdminRoute>
+                  <AdminLayout />
+                </AdminRoute>
+              }
+            >
+              <Route index element={<Navigate to="overview" replace />} />
+              <Route path="overview" element={<AdminOverviewPage />} />
+              <Route path="users" element={<AdminUsersPage />} />
+              <Route path="wallet" element={<AdminWalletPage />} />
+              <Route path="referrals" element={<AdminReferralsPage />} />
+            </Route>
+
+            {/* Старый префикс для обратной совместимости */}
             <Route
               path="/react-admin"
               element={

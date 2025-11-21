@@ -1,19 +1,93 @@
 import React, { useEffect, useState } from 'react';
 import {
-  fetchAdminMembers,
-  createAdminMember,
-  updateAdminMember,
-  resetMemberPassword,
+  getAdminMembers,
+  getAdminMemberDetail,
+  adjustAdminMemberBalance,
 } from '../../api/admin';
 
-const initialFormState = {
-  firstName: '',
-  lastName: '',
-  phone: '',
-  email: '',
-  password: '',
-  isInfluencer: false,
-  isAdmin: false,
+const formatMoney = (value) => {
+  if (value === null || value === undefined) {
+    return '0.00';
+  }
+
+  const numberValue = Number(value);
+  if (Number.isNaN(numberValue)) {
+    return String(value);
+  }
+
+  return numberValue.toFixed(2);
+};
+
+const formatVCoins = (value) => {
+  if (value === null || value === undefined) {
+    return '0.00';
+  }
+
+  const numberValue = Number(value);
+  if (Number.isNaN(numberValue)) {
+    return String(value);
+  }
+
+  return numberValue.toFixed(2);
+};
+
+const formatDateTime = (isoString) => {
+  if (!isoString) {
+    return '—';
+  }
+
+  try {
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) {
+      return isoString;
+    }
+    return date.toLocaleString('ru-RU');
+  } catch (error) {
+    return isoString;
+  }
+};
+
+const formatDelta = (value) => {
+  if (value === null || value === undefined) {
+    return '—';
+  }
+
+  const numberValue = Number(value);
+  if (Number.isNaN(numberValue)) {
+    return String(value);
+  }
+
+  if (numberValue > 0) {
+    return `+${numberValue}`;
+  }
+
+  if (numberValue < 0) {
+    return `${numberValue}`;
+  }
+
+  return '0';
+};
+
+const getOperationTypeLabel = (type) => {
+  if (type === 'deposit_accrual') {
+    return 'Начисление депозита';
+  }
+  if (type === 'deposit_withdrawal') {
+    return 'Списание депозита';
+  }
+  if (type === 'vcoins_increase') {
+    return 'Начисление V-Coins';
+  }
+  if (type === 'vcoins_decrease') {
+    return 'Списание V-Coins';
+  }
+  if (type === 'combined_adjustment') {
+    return 'Комбинированная корректировка';
+  }
+  if (!type) {
+    return 'Операция';
+  }
+  return 'Другая операция';
 };
 
 const AdminUsersPage = () => {
@@ -21,115 +95,190 @@ const AdminUsersPage = () => {
   const [count, setCount] = useState(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
 
-  const [formState, setFormState] = useState(initialFormState);
-  const [formLoading, setFormLoading] = useState(false);
-  const [formError, setFormError] = useState('');
-  const [formSuccess, setFormSuccess] = useState('');
+  const [searchPhone, setSearchPhone] = useState('');
 
-  const [updateError, setUpdateError] = useState('');
+  const [loadingList, setLoadingList] = useState(false);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [submittingOperation, setSubmittingOperation] = useState(false);
 
-  const [resetModalMemberId, setResetModalMemberId] = useState(null);
-  const [resetCustomPassword, setResetCustomPassword] = useState('');
-  const [resetResultPassword, setResetResultPassword] = useState('');
-  const [resetLoading, setResetLoading] = useState(false);
-  const [resetError, setResetError] = useState('');
-  const [resetSuccess, setResetSuccess] = useState('');
+  const [listError, setListError] = useState('');
+  const [detailError, setDetailError] = useState('');
+  const [operationError, setOperationError] = useState('');
+  const [operationSuccess, setOperationSuccess] = useState('');
 
-  const loadMembers = async (pageParam) => {
-    setLoading(true);
-    setError('');
+  const [selectedMemberId, setSelectedMemberId] = useState(null);
+  const [selectedMember, setSelectedMember] = useState(null);
+
+  const [depositDelta, setDepositDelta] = useState('');
+  const [vcoinsDelta, setVcoinsDelta] = useState('');
+  const [comment, setComment] = useState('');
+
+  const loadMembers = async (pageParam, searchValue) => {
+    setLoadingList(true);
+    setListError('');
 
     try {
-      const data = await fetchAdminMembers({ page: pageParam });
+      const params = {
+        page: pageParam,
+      };
+
+      if (searchValue) {
+        params.search_phone = searchValue;
+      }
+
+      const data = await getAdminMembers(params);
       const results = Array.isArray(data.results) ? data.results : [];
 
       setMembers(results);
-      setCount(typeof data.count === 'number' ? data.count : results.length);
+      const totalCount = typeof data.count === 'number' ? data.count : results.length;
+      setCount(totalCount);
 
       const pageSize = results.length > 0 ? results.length : 1;
-      const pages = data.count ? Math.max(1, Math.ceil(data.count / pageSize)) : 1;
+      const pages = totalCount ? Math.max(1, Math.ceil(totalCount / pageSize)) : 1;
       setTotalPages(pages);
-    } catch (err) {
-      console.error('Failed to load admin members', err);
-      setError('Не удалось загрузить пользователей. Пожалуйста, попробуйте позже.');
+    } catch (error) {
+      console.error('Failed to load admin members list', error);
+      setListError('Не удалось загрузить список пользователей. Пожалуйста, попробуйте позже.');
     } finally {
-      setLoading(false);
+      setLoadingList(false);
+    }
+  };
+
+  const loadMemberDetail = async (memberId) => {
+    if (!memberId) {
+      return;
+    }
+
+    setLoadingDetail(true);
+    setDetailError('');
+
+    try {
+      const data = await getAdminMemberDetail(memberId);
+      setSelectedMember(data || null);
+    } catch (error) {
+      console.error('Failed to load admin member detail', error);
+      setDetailError('Не удалось загрузить детали пользователя. Попробуйте позже.');
+    } finally {
+      setLoadingDetail(false);
     }
   };
 
   useEffect(() => {
-    loadMembers(page);
+    loadMembers(page, searchPhone);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
 
-  const handleInputChange = (event) => {
-    const { name, value, type, checked } = event.target;
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setPage(1);
+      loadMembers(1, searchPhone);
+    }, 400);
 
-    setFormState((prev) => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : value,
-    }));
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchPhone]);
+
+  const handleSelectMember = (memberId) => {
+    setSelectedMemberId(memberId);
+    setOperationError('');
+    setOperationSuccess('');
+    setDepositDelta('');
+    setVcoinsDelta('');
+    setComment('');
+    loadMemberDetail(memberId);
   };
 
-  const handleCreateMember = async (event) => {
+  const handleAdjustSubmit = async (event) => {
     event.preventDefault();
 
-    setFormLoading(true);
-    setFormError('');
-    setFormSuccess('');
-
-    try {
-      const payload = {
-        first_name: formState.firstName,
-        last_name: formState.lastName,
-        phone: formState.phone,
-        email: formState.email || null,
-        password: formState.password,
-        is_influencer: formState.isInfluencer,
-        is_admin: formState.isAdmin,
-      };
-
-      await createAdminMember(payload);
-      setFormSuccess('Пользователь успешно создан.');
-      setFormState(initialFormState);
-
-      // После создания возвращаемся на первую страницу списка
-      setPage(1);
-      loadMembers(1);
-    } catch (err) {
-      console.error('Failed to create admin member', err);
-      setFormError('Не удалось создать пользователя. Проверьте данные и попробуйте снова.');
-    } finally {
-      setFormLoading(false);
+    if (!selectedMemberId) {
+      setOperationError('Сначала выберите пользователя в списке слева.');
+      setOperationSuccess('');
+      return;
     }
-  };
 
-  const handleToggleFlag = async (id, field, checked) => {
-    setUpdateError('');
+    const depositTrimmed = depositDelta ? String(depositDelta).trim() : '';
+    const vcoinsTrimmed = vcoinsDelta ? String(vcoinsDelta).trim() : '';
+
+    const hasDepositChange = depositTrimmed !== '';
+    const hasVcoinsChange = vcoinsTrimmed !== '';
+
+    if (!hasDepositChange && !hasVcoinsChange) {
+      setOperationError('Укажите изменение депозита или V-Coins (значения не должны быть пустыми или равными нулю).');
+      setOperationSuccess('');
+      return;
+    }
+
+    const payload = {};
+
+    if (hasDepositChange) {
+      const depositNumber = Number(depositTrimmed.replace(',', '.'));
+      if (!depositNumber || Number.isNaN(depositNumber)) {
+        setOperationError('Введите корректное число для изменения депозита (может быть положительным или отрицательным).');
+        setOperationSuccess('');
+        return;
+      }
+      payload.deposit_delta = depositNumber;
+    }
+
+    if (hasVcoinsChange) {
+      const vcoinsNumber = Number(vcoinsTrimmed.replace(',', '.'));
+      if (!vcoinsNumber || Number.isNaN(vcoinsNumber)) {
+        setOperationError('Введите корректное число для изменения V-Coins (может быть положительным или отрицательным).');
+        setOperationSuccess('');
+        return;
+      }
+      payload.vcoins_delta = vcoinsNumber;
+    }
+
+    const commentTrimmed = comment ? String(comment).trim() : '';
+    if (commentTrimmed) {
+      payload.comment = commentTrimmed;
+    }
+
+    setSubmittingOperation(true);
+    setOperationError('');
+    setOperationSuccess('');
 
     try {
-      const payload = {
-        [field]: checked,
-      };
+      const updated = await adjustAdminMemberBalance(selectedMemberId, payload);
+      setSelectedMember(updated || null);
 
-      await updateAdminMember(id, payload);
+      // Обновляем список, чтобы отразить новые балансы в левой колонке
+      loadMembers(page, searchPhone);
 
-      setMembers((prev) =>
-        prev.map((member) =>
-          member.id === id
-            ? {
-                ...member,
-                [field]: checked,
-              }
-            : member
-        )
-      );
-    } catch (err) {
-      console.error('Failed to update member flags', err);
-      setUpdateError('Не удалось обновить статус пользователя. Попробуйте позже.');
+      setOperationSuccess('Операция успешно выполнена. Балансы обновлены.');
+    } catch (error) {
+      console.error('Failed to adjust member balance', error);
+
+      let message = 'Не удалось выполнить операцию. Проверьте данные и попробуйте ещё раз.';
+      const responseData = error && error.response && error.response.data ? error.response.data : null;
+
+      if (responseData) {
+        if (typeof responseData === 'string') {
+          message = responseData;
+        } else if (responseData.detail && typeof responseData.detail === 'string') {
+          message = responseData.detail;
+        } else if (responseData.deposit_delta) {
+          const value = Array.isArray(responseData.deposit_delta)
+            ? responseData.deposit_delta[0]
+            : responseData.deposit_delta;
+          message = String(value);
+        } else if (responseData.vcoins_delta) {
+          const value = Array.isArray(responseData.vcoins_delta)
+            ? responseData.vcoins_delta[0]
+            : responseData.vcoins_delta;
+          message = String(value);
+        }
+      }
+
+      setOperationError(message);
+      setOperationSuccess('');
+    } finally {
+      setSubmittingOperation(false);
     }
   };
 
@@ -145,72 +294,52 @@ const AdminUsersPage = () => {
     }
   };
 
-  const openResetModal = (memberId) => {
-    setResetModalMemberId(memberId);
-    setResetCustomPassword('');
-    setResetResultPassword('');
-    setResetLoading(false);
-    setResetError('');
-    setResetSuccess('');
-  };
-
-  const closeResetModal = () => {
-    setResetModalMemberId(null);
-    setResetCustomPassword('');
-    setResetResultPassword('');
-    setResetLoading(false);
-    setResetError('');
-    setResetSuccess('');
-  };
-
-  const handleConfirmReset = async () => {
-    if (!resetModalMemberId) {
-      return;
+  const getMemberDepositBalance = (member) => {
+    if (!member) {
+      return '0.00';
     }
 
-    setResetLoading(true);
-    setResetError('');
-    setResetSuccess('');
-    setResetResultPassword('');
-
-    try {
-      const payload = {};
-      const trimmedPassword = resetCustomPassword ? resetCustomPassword.trim() : '';
-
-      if (trimmedPassword) {
-        payload.new_password = trimmedPassword;
-      }
-
-      const data = await resetMemberPassword(resetModalMemberId, payload);
-
-      const generated = data && data.generated_password ? String(data.generated_password) : '';
-      const detail = data && data.detail
-        ? data.detail
-        : 'Пароль пользователя успешно сброшен администратором.';
-
-      setResetSuccess(detail);
-      setResetResultPassword(generated);
-    } catch (err) {
-      console.error('Failed to reset member password', err);
-      const responseData = err && err.response && err.response.data ? err.response.data : null;
-      let message = 'Не удалось сбросить пароль. Попробуйте ещё раз.';
-
-      if (responseData) {
-        if (responseData.new_password) {
-          const value = Array.isArray(responseData.new_password)
-            ? responseData.new_password[0]
-            : responseData.new_password;
-          message = String(value);
-        } else if (responseData.detail && typeof responseData.detail === 'string') {
-          message = responseData.detail;
-        }
-      }
-
-      setResetError(message);
-    } finally {
-      setResetLoading(false);
+    if (member.wallet_balance !== null && member.wallet_balance !== undefined) {
+      return formatMoney(member.wallet_balance);
     }
+
+    if (member.cash_balance !== null && member.cash_balance !== undefined) {
+      return formatMoney(member.cash_balance);
+    }
+
+    return '0.00';
   };
+
+  const getMemberVcoinsBalance = (member) => {
+    if (!member) {
+      return '0.00';
+    }
+
+    if (member.v_coins_balance !== null && member.v_coins_balance !== undefined) {
+      return formatVCoins(member.v_coins_balance);
+    }
+
+    return '0.00';
+  };
+
+  const isMemberActive = (member) => {
+    if (!member) {
+      return false;
+    }
+
+    if (typeof member.is_active === 'boolean') {
+      return member.is_active;
+    }
+
+    const deposit = Number(getMemberDepositBalance(member));
+    const vcoins = Number(getMemberVcoinsBalance(member));
+
+    return deposit > 0 || vcoins > 0;
+  };
+
+  const activeFlag = isMemberActive(selectedMember);
+  const selectedDepositBalance = getMemberDepositBalance(selectedMember);
+  const selectedVcoinsBalance = getMemberVcoinsBalance(selectedMember);
 
   return (
     <main
@@ -218,359 +347,347 @@ const AdminUsersPage = () => {
       className="page-admin-users-inner"
     >
       <section className="card admin-section-header">
-        <h2 className="section-title">Пользователи</h2>
+        <h2 className="section-title">Пользователи и балансы</h2>
         <p className="section-subtitle">
-          Управление учетными записями игроков, инфлюенсеров и администраторов.
+          Найдите пользователя по номеру телефона, просмотрите его текущие балансы и
+          выполните ручное начисление или списание депозита и V-Coins.
         </p>
       </section>
 
-      <section className="card admin-form-card">
-        <h3 className="admin-form-title">Создать нового пользователя</h3>
-        <p className="admin-form-subtitle">
-          Используйте эту форму, чтобы заводить аккаунты игроков, инфлюенсеров и администраторов.
-        </p>
-
-        <form className="admin-form-grid" onSubmit={handleCreateMember}>
-          <div className="admin-form-row">
-            <label className="admin-form-label" htmlFor="firstName">
-              Имя
-            </label>
-            <input
-              id="firstName"
-              name="firstName"
-              type="text"
-              className="admin-form-input"
-              value={formState.firstName}
-              onChange={handleInputChange}
-              required
-            />
-          </div>
-
-          <div className="admin-form-row">
-            <label className="admin-form-label" htmlFor="lastName">
-              Фамилия
-            </label>
-            <input
-              id="lastName"
-              name="lastName"
-              type="text"
-              className="admin-form-input"
-              value={formState.lastName}
-              onChange={handleInputChange}
-              required
-            />
-          </div>
-
-          <div className="admin-form-row">
-            <label className="admin-form-label" htmlFor="phone">
-              Телефон
-            </label>
-            <input
-              id="phone"
-              name="phone"
-              type="tel"
-              className="admin-form-input"
-              value={formState.phone}
-              onChange={handleInputChange}
-              required
-            />
-          </div>
-
-          <div className="admin-form-row">
-            <label className="admin-form-label" htmlFor="email">
-              Email
-            </label>
-            <input
-              id="email"
-              name="email"
-              type="email"
-              className="admin-form-input"
-              value={formState.email}
-              onChange={handleInputChange}
-            />
-          </div>
-
-          <div className="admin-form-row">
-            <label className="admin-form-label" htmlFor="password">
-              Пароль
-            </label>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              className="admin-form-input"
-              value={formState.password}
-              onChange={handleInputChange}
-              required
-            />
-          </div>
-
-          <div className="admin-form-row admin-form-row-inline">
-            <label className="admin-checkbox-label">
+      <section className="card admin-users-layout-card">
+        <div className="admin-users-layout">
+          {/* Левая колонка: список пользователей */}
+          <div className="admin-users-list">
+            <div className="admin-users-search">
+              <label className="admin-form-label" htmlFor="adminSearchPhone">
+                Поиск по номеру телефона
+              </label>
               <input
-                type="checkbox"
-                name="isInfluencer"
-                checked={formState.isInfluencer}
-                onChange={handleInputChange}
+                id="adminSearchPhone"
+                type="text"
+                className="admin-users-search-input"
+                placeholder="Поиск по номеру телефона"
+                value={searchPhone}
+                onChange={(event) => setSearchPhone(event.target.value)}
               />
-              <span>Инфлюенсер</span>
-            </label>
+              <p className="admin-users-search-hint">
+                Введите часть номера телефона, чтобы быстро найти нужного пользователя.
+              </p>
+            </div>
 
-            <label className="admin-checkbox-label">
-              <input
-                type="checkbox"
-                name="isAdmin"
-                checked={formState.isAdmin}
-                onChange={handleInputChange}
-              />
-              <span>Админ</span>
-            </label>
-          </div>
+            {loadingList && (
+              <div className="admin-users-list-status">Загрузка списка пользователей...</div>
+            )}
 
-          {formError && <p className="admin-form-error">{formError}</p>}
-          {formSuccess && <p className="admin-form-success">{formSuccess}</p>}
+            {listError && !loadingList && (
+              <div className="admin-table-error admin-users-list-error">{listError}</div>
+            )}
 
-          <div className="admin-form-actions">
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={formLoading}
-            >
-              {formLoading ? 'Создание...' : 'Создать пользователя'}
-            </button>
-          </div>
-        </form>
-      </section>
+            {!loadingList && !listError && (
+              <div className="admin-user-list">
+                {members.length === 0 ? (
+                  <div className="admin-users-list-empty">Пользователи не найдены.</div>
+                ) : (
+                  members.map((member) => {
+                    const fullName = `${member.first_name || ''} ${member.last_name || ''}`.trim();
+                    const displayName = fullName || member.phone || `ID ${member.id}`;
+                    const active = isMemberActive(member);
+                    const isSelected = selectedMemberId === member.id;
 
-      <section className="card admin-table-card">
-        <div className="admin-table-header">
-          <div>
-            <h3 className="admin-table-title">Список пользователей</h3>
-            <p className="admin-table-subtitle">
-              Всего пользователей: {count}
-            </p>
-            <p className="admin-table-helper">
-              Если отметить игрока как инфлюенсера, все его будущие реферальные депозиты
-              будут начисляться по правилам программы для инфлюенсеров. Уже созданные
-              реферальные события не изменятся.
-            </p>
-          </div>
-        </div>
-
-        {loading && (
-          <p className="admin-table-loading">Загрузка списка пользователей...</p>
-        )}
-
-        {error && !loading && <p className="admin-table-error">{error}</p>}
-        {updateError && !loading && (
-          <p className="admin-table-error">{updateError}</p>
-        )}
-
-        {!loading && !error && (
-          <div className="table-wrapper">
-            <table className="table admin-table">
-              <thead>
-                <tr>
-                  <th>Имя</th>
-                  <th>Фамилия</th>
-                  <th>Телефон</th>
-                  <th>Email</th>
-                  <th>Статус</th>
-                  <th>Роль</th>
-                  <th>Кол-во рефералов</th>
-                  <th>Бонусы</th>
-                  <th>Заработано денег</th>
-                  <th>Инфлюенсер-программа</th>
-                  <th>Инфлюенсер</th>
-                  <th>Админ</th>
-                  <th>Сброс пароля</th>
-                </tr>
-              </thead>
-              <tbody>
-                {members.length === 0 && (
-                  <tr>
-                    <td colSpan={13} className="admin-table-empty">
-                      Пользователи не найдены.
-                    </td>
-                  </tr>
-                )}
-
-                {members.map((member) => (
-                  <React.Fragment key={member.id}>
-                    <tr>
-                      <td>
-                        <div className="admin-member-name-cell">
-                          <span>{member.first_name}</span>
-                          {member.is_influencer && (
-                            <span className="admin-badge admin-badge-influencer">Инфлюенсер</span>
+                    return (
+                      <button
+                        type="button"
+                        key={member.id}
+                        className={
+                          isSelected
+                            ? 'admin-user-item admin-user-item--active'
+                            : 'admin-user-item'
+                        }
+                        onClick={() => handleSelectMember(member.id)}
+                      >
+                        <div className="admin-user-item-header">
+                          <div className="admin-user-item-name">{displayName}</div>
+                          <div
+                            className={
+                              active
+                                ? 'admin-user-status-badge admin-user-status-badge--active'
+                                : 'admin-user-status-badge admin-user-status-badge--inactive'
+                            }
+                          >
+                            {active ? 'Активен' : 'Неактивен'}
+                          </div>
+                        </div>
+                        <div className="admin-user-item-subtitle">
+                          <span className="admin-user-item-phone">{member.phone || '—'}</span>
+                          {member.email && (
+                            <span className="admin-user-item-email">{member.email}</span>
                           )}
                         </div>
-                      </td>
-                      <td>{member.last_name}</td>
-                      <td>{member.phone}</td>
-                      <td>{member.email || '—'}</td>
-                      <td>{member.is_influencer ? 'Инфлюенсер' : 'Игрок'}</td>
-                      <td>{member.is_admin ? 'Админ' : 'Пользователь'}</td>
-                      <td>{member.total_referrals}</td>
-                      <td>{member.total_bonus_points}</td>
-                      <td>{member.total_money_earned} ₽</td>
-                      <td>
-                        {member.is_influencer ? (
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            onClick={() =>
-                              handleToggleFlag(member.id, 'is_influencer', false)
-                            }
-                          >
-                            Снять статус инфлюенсера
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="btn btn-primary"
-                            onClick={() =>
-                              handleToggleFlag(member.id, 'is_influencer', true)
-                            }
-                          >
-                            Сделать инфлюенсером
-                          </button>
-                        )}
-                      </td>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={member.is_influencer}
-                          onChange={(event) =>
-                            handleToggleFlag(
-                              member.id,
-                              'is_influencer',
-                              event.target.checked
-                            )
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={member.is_admin}
-                          onChange={(event) =>
-                            handleToggleFlag(
-                              member.id,
-                              'is_admin',
-                              event.target.checked
-                            )
-                          }
-                        />
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          onClick={() => openResetModal(member.id)}
-                        >
-                          Сбросить пароль
-                        </button>
-                      </td>
-                    </tr>
-
-                    {resetModalMemberId === member.id && (
-                      <tr>
-                        <td colSpan={13} className="admin-reset-row">
-                          <div className="admin-reset-panel">
-                            <h4 className="admin-reset-title">
-                              Сброс пароля для пользователя ID {member.id}
-                            </h4>
-                            <p className="admin-reset-text">
-                              Вы можете задать новый пароль вручную или оставить поле пустым,
-                              чтобы система сгенерировала случайный безопасный пароль.
-                            </p>
-
-                            <div className="admin-form-row">
-                              <label className="admin-form-label" htmlFor={`resetPassword-${member.id}`}>
-                                Новый пароль (необязательно)
-                              </label>
-                              <input
-                                id={`resetPassword-${member.id}`}
-                                type="password"
-                                className="admin-form-input"
-                                value={resetCustomPassword}
-                                onChange={(event) => setResetCustomPassword(event.target.value)}
-                                placeholder="Оставьте пустым для автогенерации пароля"
-                              />
-                            </div>
-
-                            {resetError && (
-                              <div className="admin-form-error">{resetError}</div>
-                            )}
-
-                            {resetSuccess && (
-                              <div className="admin-form-success">{resetSuccess}</div>
-                            )}
-
-                            {resetResultPassword && (
-                              <div className="admin-reset-password-result">
-                                <div className="admin-reset-password-label">
-                                  Сгенерированный пароль (показывается один раз):
-                                </div>
-                                <div className="admin-reset-password-value">
-                                  {resetResultPassword}
-                                </div>
-                                <div className="admin-reset-password-note">
-                                  Передайте этот пароль пользователю безопасным способом.
-                                </div>
-                              </div>
-                            )}
-
-                            <div className="admin-reset-actions">
-                              <button
-                                type="button"
-                                className="btn btn-secondary"
-                                onClick={closeResetModal}
-                                disabled={resetLoading}
-                              >
-                                Отмена
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-primary"
-                                onClick={handleConfirmReset}
-                                disabled={resetLoading}
-                              >
-                                {resetLoading ? 'Сброс...' : 'Сбросить пароль'}
-                              </button>
-                            </div>
+                        <div className="admin-user-item-balances">
+                          <div className="admin-user-item-balance">
+                            <span className="admin-user-item-balance-label">Депозит</span>
+                            <span className="admin-user-item-balance-value">
+                              {getMemberDepositBalance(member)} ₽
+                            </span>
                           </div>
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                          <div className="admin-user-item-balance">
+                            <span className="admin-user-item-balance-label">V-Coins</span>
+                            <span className="admin-user-item-balance-value">
+                              {getMemberVcoinsBalance(member)}
+                            </span>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
 
-        <div className="admin-pagination">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={handlePrevPage}
-            disabled={page <= 1 || loading}
-          >
-            Назад
-          </button>
-          <span className="admin-pagination-info">
-            Страница {page} из {totalPages}
-          </span>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={handleNextPage}
-            disabled={page >= totalPages || loading}
-          >
-            Вперёд
-          </button>
+            <div className="admin-pagination admin-users-pagination">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handlePrevPage}
+                disabled={page <= 1 || loadingList}
+              >
+                Назад
+              </button>
+              <span className="admin-pagination-info">
+                Страница {page} из {totalPages} • Всего: {count}
+              </span>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleNextPage}
+                disabled={page >= totalPages || loadingList}
+              >
+                Вперёд
+              </button>
+            </div>
+          </div>
+
+          {/* Правая колонка: подробности и операции */}
+          <div className="admin-user-detail">
+            {!selectedMember && !loadingDetail && (
+              <div className="admin-user-detail-empty">
+                Выберите пользователя из списка слева, чтобы увидеть балансы и историю
+                операций.
+              </div>
+            )}
+
+            {loadingDetail && (
+              <div className="admin-users-list-status">Загрузка данных пользователя...</div>
+            )}
+
+            {detailError && !loadingDetail && (
+              <div className="admin-table-error">{detailError}</div>
+            )}
+
+            {selectedMember && !loadingDetail && (
+              <>
+                <section className="admin-user-detail-header-section">
+                  <div className="admin-user-header">
+                    <div>
+                      <h3 className="admin-user-title">
+                        {selectedMember.first_name || selectedMember.last_name
+                          ? `${selectedMember.first_name || ''} ${selectedMember.last_name || ''}`.trim()
+                          : selectedMember.phone || `ID ${selectedMember.id}`}
+                      </h3>
+                      <p className="admin-user-subtitle">
+                        Телефон: {selectedMember.phone || '—'}
+                        {selectedMember.email && ` • Email: ${selectedMember.email}`}
+                      </p>
+                    </div>
+                    <div className="admin-user-header-status">
+                      <div
+                        className={
+                          activeFlag
+                            ? 'admin-user-status-badge admin-user-status-badge--active'
+                            : 'admin-user-status-badge admin-user-status-badge--inactive'
+                        }
+                      >
+                        {activeFlag ? 'Активен' : 'Неактивен'}
+                      </div>
+                      {selectedMember.is_influencer && (
+                        <div className="admin-user-role-badge">Инфлюенсер</div>
+                      )}
+                      {selectedMember.is_admin && (
+                        <div className="admin-user-role-badge admin-user-role-badge--admin">
+                          Администратор
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="admin-balances">
+                    <h4 className="admin-subsection-title">Текущие балансы</h4>
+                    <p className="admin-subsection-caption">
+                      Значения после всех операций. Денежный баланс используется как депозит
+                      в рублях, V-Coins — виртуальные фишки.
+                    </p>
+
+                    <div className="admin-balances-grid">
+                      <div className="admin-balance-card">
+                        <div className="admin-balance-label">Депозит (рубли)</div>
+                        <div className="admin-balance-value">
+                          {selectedDepositBalance} ₽
+                        </div>
+                        <div className="admin-balance-caption">
+                          Денежный баланс, который нельзя сделать отрицательным при
+                          списаниях.
+                        </div>
+                      </div>
+
+                      <div className="admin-balance-card">
+                        <div className="admin-balance-label">V-Coins</div>
+                        <div className="admin-balance-value">
+                          {selectedVcoinsBalance}
+                        </div>
+                        <div className="admin-balance-caption">
+                          Виртуальные фишки, начисляемые за активность и рефералов.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="admin-user-operation-section">
+                  <h4 className="admin-subsection-title">Ручная корректировка балансов</h4>
+                  <p className="admin-subsection-caption">
+                    Положительные числа начисляют средства или V-Coins, отрицательные —
+                    списывают. Система не позволит сделать депозиты или V-Coins отрицательными.
+                  </p>
+
+                  <form className="admin-user-operation-form" onSubmit={handleAdjustSubmit}>
+                    <div className="admin-form-grid admin-user-operation-grid">
+                      <div className="admin-form-row">
+                        <label
+                          className="admin-form-label"
+                          htmlFor="depositDeltaInput"
+                        >
+                          Изменение депозита (₽)
+                        </label>
+                        <input
+                          id="depositDeltaInput"
+                          type="number"
+                          step="0.01"
+                          className="admin-form-input"
+                          value={depositDelta}
+                          onChange={(event) => setDepositDelta(event.target.value)}
+                          placeholder="Например: 500 или -300"
+                        />
+                      </div>
+
+                      <div className="admin-form-row">
+                        <label
+                          className="admin-form-label"
+                          htmlFor="vcoinsDeltaInput"
+                        >
+                          Изменение V-Coins
+                        </label>
+                        <input
+                          id="vcoinsDeltaInput"
+                          type="number"
+                          step="1"
+                          className="admin-form-input"
+                          value={vcoinsDelta}
+                          onChange={(event) => setVcoinsDelta(event.target.value)}
+                          placeholder="Например: 1000 или -500"
+                        />
+                      </div>
+
+                      <div className="admin-form-row admin-user-comment-row">
+                        <label
+                          className="admin-form-label"
+                          htmlFor="adminOperationComment"
+                        >
+                          Комментарий
+                        </label>
+                        <textarea
+                          id="adminOperationComment"
+                          className="admin-form-input admin-form-textarea"
+                          rows={2}
+                          value={comment}
+                          onChange={(event) => setComment(event.target.value)}
+                          placeholder="Например: корректировка по итогам проверки или бонусное начисление"
+                        />
+                      </div>
+
+                      {operationError && (
+                        <p className="admin-form-error admin-operation-message">
+                          {operationError}
+                        </p>
+                      )}
+
+                      {operationSuccess && (
+                        <p className="admin-form-success admin-operation-message">
+                          {operationSuccess}
+                        </p>
+                      )}
+
+                      <div className="admin-form-actions admin-user-operation-actions">
+                        <button
+                          type="submit"
+                          className="btn btn-primary"
+                          disabled={submittingOperation}
+                        >
+                          {submittingOperation
+                            ? 'Применение...'
+                            : 'Применить операцию'}
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                </section>
+
+                <section className="admin-user-history-section">
+                  <h4 className="admin-subsection-title">История операций</h4>
+                  <p className="admin-subsection-caption">
+                    Последние операции по корректировке балансов этого пользователя, в
+                    порядке от новых к старым.
+                  </p>
+
+                  {!selectedMember.operations || selectedMember.operations.length === 0 ? (
+                    <div className="admin-users-list-empty">Операций пока нет.</div>
+                  ) : (
+                    <div className="admin-history-table-wrapper">
+                      <table className="admin-history-table">
+                        <thead>
+                          <tr>
+                            <th>Дата</th>
+                            <th>Тип</th>
+                            <th>Изменение депозита</th>
+                            <th>Изменение V-Coins</th>
+                            <th>Баланс депозита</th>
+                            <th>Баланс V-Coins</th>
+                            <th>Комментарий</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedMember.operations.map((operation) => {
+                            const key = operation.id || `${operation.created_at || ''}-${operation.operation_type || ''}`;
+
+                            return (
+                              <tr key={key}>
+                                <td>{formatDateTime(operation.created_at)}</td>
+                                <td>{getOperationTypeLabel(operation.operation_type)}</td>
+                                <td>{formatDelta(operation.deposit_change)}</td>
+                                <td>{formatDelta(operation.vcoins_change)}</td>
+                                <td>{formatMoney(operation.balance_deposit_after)}</td>
+                                <td>{formatVCoins(operation.balance_vcoins_after)}</td>
+                                <td>{operation.comment || '—'}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+              </>
+            )}
+          </div>
         </div>
       </section>
     </main>

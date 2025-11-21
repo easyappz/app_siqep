@@ -35,16 +35,16 @@ const AdminLayout = () => {
           </div>
 
           <nav className="admin-nav">
-            <NavLink to="/react-admin/overview" className={getNavLinkClassName} end>
+            <NavLink to="/admin/overview" className={getNavLinkClassName} end>
               Общая статистика
             </NavLink>
-            <NavLink to="/react-admin/users" className={getNavLinkClassName}>
+            <NavLink to="/admin/users" className={getNavLinkClassName}>
               Пользователи
             </NavLink>
-            <NavLink to="/react-admin/wallet" className={getNavLinkClassName}>
+            <NavLink to="/admin/wallet" className={getNavLinkClassName}>
               Баланс пользователей
             </NavLink>
-            <NavLink to="/react-admin/referrals" className={getNavLinkClassName}>
+            <NavLink to="/admin/referrals" className={getNavLinkClassName}>
               Рефералы
             </NavLink>
           </nav>
