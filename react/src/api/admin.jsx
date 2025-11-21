@@ -1,8 +1,35 @@
 import instance from './axios';
 
-export async function fetchAdminMembers(params = {}) {
+// New helper: get admin members list with search and pagination
+export async function getAdminMembers(options = {}) {
+  const params = {};
+
+  if (options && typeof options === 'object') {
+    const { searchPhone, search_phone, page, pageSize, page_size } = options;
+
+    const resolvedSearchPhone = typeof search_phone !== 'undefined' ? search_phone : searchPhone;
+    const resolvedPageSize = typeof page_size !== 'undefined' ? page_size : pageSize;
+
+    if (resolvedSearchPhone !== undefined && resolvedSearchPhone !== null && resolvedSearchPhone !== '') {
+      params.search_phone = resolvedSearchPhone;
+    }
+
+    if (page !== undefined && page !== null) {
+      params.page = page;
+    }
+
+    if (resolvedPageSize !== undefined && resolvedPageSize !== null) {
+      params.page_size = resolvedPageSize;
+    }
+  }
+
   const response = await instance.get('/api/admin/members/', { params });
   return response.data;
+}
+
+// Backward compatible helper (older name) that simply delegates to getAdminMembers
+export async function fetchAdminMembers(params = {}) {
+  return getAdminMembers(params);
 }
 
 export async function createAdminMember(data) {
@@ -12,6 +39,22 @@ export async function createAdminMember(data) {
 
 export async function updateAdminMember(id, data) {
   const response = await instance.patch(`/api/admin/members/${id}/`, data);
+  return response.data;
+}
+
+// New helper: get detailed info about a single member
+export async function getAdminMemberDetail(memberId) {
+  const response = await instance.get(`/api/admin/members/${memberId}/`);
+  return response.data;
+}
+
+// New helper: adjust member balance (cash and/or V-Coins)
+export async function adjustAdminMemberBalance(memberId, payload) {
+  const body = payload && typeof payload === 'object' ? payload : {};
+  const response = await instance.post(
+    `/api/admin/members/${memberId}/adjust-balance/`,
+    body
+  );
   return response.data;
 }
 
@@ -32,7 +75,10 @@ export async function fetchAdminStatsOverview() {
 
 export async function resetMemberPassword(memberId, data) {
   const payload = data && typeof data === 'object' ? data : {};
-  const response = await instance.post(`/api/admin/members/${memberId}/reset-password/`, payload);
+  const response = await instance.post(
+    `/api/admin/members/${memberId}/reset-password/`,
+    payload
+  );
   return response.data;
 }
 
