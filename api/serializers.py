@@ -496,3 +496,39 @@ class RegistrationSerializer(serializers.Serializer):
 
 class LoginSerializer(serializers.Serializer):
     """Serializer used for login by phone and password."""
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """Serializer used for changing password of the authenticated Member."""
+
+    old_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        member = getattr(request, "user", None) if request is not None else None
+
+        if not isinstance(member, Member):
+            raise serializers.ValidationError(
+                "Не удалось определить текущего пользователя."
+            )
+
+        old_password = attrs.get("old_password", "")
+        new_password = attrs.get("new_password", "")
+
+        if not member.check_password(old_password):
+            raise serializers.ValidationError(
+                {"old_password": "Текущий пароль указан неверно."}
+            )
+
+        if len(new_password) < 6:
+            raise serializers.ValidationError(
+                {"new_password": "Пароль должен содержать не менее 6 символов."}
+            )
+
+        if old_password == new_password:
+            raise serializers.ValidationError(
+                {"new_password": "Новый пароль не должен совпадать с текущим паролем."}
+            )
+
+        return attrs
