@@ -115,6 +115,135 @@ class WalletModelTests(TestCase):
         )
 
 
+class WalletAPITests(TestCase):
+    """Tests for wallet API endpoints: summary, transactions, deposit, spend."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.member = Member(
+            first_name="ApiWallet",
+            last_name="User",
+            phone="+79990001234",
+            email=None,
+            is_influencer=False,
+            is_admin=False,
+        )
+        self.member.set_password("wallet123")
+        self.member.save()
+
+        token = MemberAuthToken.create_for_member(self.member)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+        self.summary_url = "/api/wallet/summary/"
+        self.transactions_url = "/api/wallet/transactions/"
+        self.deposit_url = "/api/wallet/deposit/"
+        self.spend_url = "/api/wallet/spend/"
+
+    def test_wallet_summary_initial_zero(self):
+        response = self.client.get(self.summary_url, format="json")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data.get("balance"), "0.00")
+        self.assertEqual(data.get("total_deposited"), "0.00")
+        self.assertEqual(data.get("total_spent"), "0.00")
+
+    def test_deposit_via_api_creates_transaction_and_updates_balance(self):
+        payload = {"amount": "100.50", "description": "API test deposit"}
+        response = self.client.post(self.deposit_url, payload, format="json")
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        self.assertEqual(data.get("type"), "deposit")
+        self.assertEqual(data.get("amount"), "100.50")
+
+        # Summary must reflect new balance
+        summary = self.client.get(self.summary_url, format="json").json()
+        self.assertEqual(summary.get("balance"), "100.50")
+        self.assertEqual(summary.get("total_deposited"), "100.50")
+
+    def test_wallet_transactions_list_and_filter(self):
+        # Create two deposits
+        self.client.post(self.deposit_url, {"amount": "50.00"}, format="json")
+        self.client.post(self.deposit_url, {"amount": "25.00"}, format="json")
+
+        response = self.client.get(self.transactions_url, format="json")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("results", data)
+        self.assertGreaterEqual(len(data["results"]), 2)
+
+        # Filter by type=deposit
+        response_filtered = self.client.get(
+            self.transactions_url + "?type=deposit", format="json"
+        )
+        self.assertEqual(response_filtered.status_code, 200)
+        data_filtered = response_filtered.json()
+        for item in data_filtered.get("results", []):
+            self.assertEqual(item.get("type"), "deposit")
+
+    def test_spend_via_api_with_sufficient_balance(self):
+        # Deposit first
+        self.client.post(self.deposit_url, {"amount": "100.00"}, format="json")
+
+        payload = {
+            "amount": "40.00",
+            "description": "Spend for game",
+            "category": "game",
+        }
+        response = self.client.post(self.spend_url, payload, format="json")
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        self.assertEqual(data.get("type"), "spend")
+        self.assertEqual(data.get("amount"), "40.00")
+
+        # Balance should be 60.00
+        summary = self.client.get(self.summary_url, format="json").json()
+        self.assertEqual(summary.get("balance"), "60.00")
+        self.assertEqual(summary.get("total_spent"), "40.00")
+
+    def test_spend_via_api_insufficient_balance(self):
+        payload = {"amount": "10.00", "description": "Insufficient"}
+        response = self.client.post(self.spend_url, payload, format="json")
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertIn("amount", data)
+        self.assertEqual(data["amount"], ["Недостаточно средств на кошельке."])
+
+    def test_influencer_can_use_wallet_endpoints(self):
+        influencer = Member(
+            first_name="InfluencerApi",
+            last_name="User",
+            phone="+79990004321",
+            email=None,
+            is_influencer=True,
+            is_admin=False,
+            user_type=USER_TYPE_INFLUENCER,
+        )
+        influencer.set_password("wallet123")
+        influencer.save()
+
+        token = MemberAuthToken.create_for_member(influencer)
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+        # Deposit and spend
+        deposit_resp = client.post(
+            "/api/wallet/deposit/",
+            {"amount": "150.00", "description": "Influencer deposit"},
+            format="json",
+        )
+        self.assertEqual(deposit_resp.status_code, 201)
+
+        spend_resp = client.post(
+            "/api/wallet/spend/",
+            {"amount": "50.00", "description": "Influencer spend"},
+            format="json",
+        )
+        self.assertEqual(spend_resp.status_code, 201)
+
+        summary = client.get("/api/wallet/summary/", format="json").json()
+        self.assertEqual(summary.get("balance"), "100.00")
+
+
 class RankedReferralLogicTests(TestCase):
     def _create_member(
         self,

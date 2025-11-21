@@ -8,6 +8,10 @@ from .views import (
     PasswordResetRequestView,
     PasswordResetConfirmView,
     MeView,
+    WalletSummaryView,
+    WalletTransactionListView,
+    WalletDepositView,
+    WalletSpendView,
     ProfileStatsView,
     ReferralTreeView,
     ReferralRewardsView,
@@ -37,6 +41,27 @@ urlpatterns = [
         name="password-reset-confirm",
     ),
     path("auth/me/", MeView.as_view(), name="me"),
+    # Wallet endpoints
+    path(
+        "wallet/summary/",
+        WalletSummaryView.as_view(),
+        name="wallet-summary",
+    ),
+    path(
+        "wallet/transactions/",
+        WalletTransactionListView.as_view(),
+        name="wallet-transactions",
+    ),
+    path(
+        "wallet/deposit/",
+        WalletDepositView.as_view(),
+        name="wallet-deposit",
+    ),
+    path(
+        "wallet/spend/",
+        WalletSpendView.as_view(),
+        name="wallet-spend",
+    ),
     path("profile/stats/", ProfileStatsView.as_view(), name="profile-stats"),
     path(
         "referrals/tree/",

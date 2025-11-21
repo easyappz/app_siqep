@@ -11,7 +11,7 @@ from rest_framework import status, generics
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from .authentication import MemberTokenAuthentication
 from .models import (
@@ -21,6 +21,7 @@ from .models import (
     ReferralReward,
     ReferralRelation,
     WithdrawalRequest,
+    WalletTransaction,
 )
 from .permissions import IsAdminMember
 from .referral_utils import process_member_deposit, simulate_demo_deposits_for_amir_alfira
@@ -47,6 +48,10 @@ from .serializers import (
     SimulateDemoDepositsRequestSerializer,
     SimulateDemoDepositsResponseSerializer,
     WithdrawalRequestSerializer,
+    WalletTransactionSerializer,
+    WalletSummarySerializer,
+    WalletDepositRequestSerializer,
+    WalletSpendRequestSerializer,
 )
 
 
@@ -226,6 +231,158 @@ class MeView(APIView):
         serializer.save()
         output_serializer = MemberSerializer(member)
         return Response(output_serializer.data, status=status.HTTP_200_OK)
+
+
+class WalletSummaryView(APIView):
+    """Return wallet summary (balance and aggregates) for the current member."""
+
+    authentication_classes = [MemberTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        responses={200: WalletSummarySerializer},
+        description=(
+            "Получить сводку по кошельку текущего пользователя: текущий баланс, "
+            "суммарные пополнения и траты."
+        ),
+    )
+    def get(self, request):
+        member: Member = request.user
+
+        balance = member.get_balance()
+
+        deposited = (
+            member.wallet_transactions.filter(
+                type=WalletTransaction.Type.DEPOSIT,
+            ).aggregate(total=Sum("amount"))["total"]
+            or Decimal("0.00")
+        )
+        spent = (
+            member.wallet_transactions.filter(
+                type__in=[
+                    WalletTransaction.Type.SPEND,
+                    WalletTransaction.Type.WITHDRAW,
+                ],
+            ).aggregate(total=Sum("amount"))["total"]
+            or Decimal("0.00")
+        )
+
+        summary_data = {
+            "balance": balance,
+            "total_deposited": deposited,
+            "total_spent": spent,
+        }
+        serializer = WalletSummarySerializer(summary_data)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class WalletTransactionListView(generics.ListAPIView):
+    """Paginated transaction history for the current member's wallet.""" 
+
+    authentication_classes = [MemberTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+    serializer_class = WalletTransactionSerializer
+
+    @extend_schema(
+        responses={200: WalletTransactionSerializer(many=True)},
+        description=(
+            "Получить историю операций по кошельку текущего пользователя. "
+            "Результат постраничный, по умолчанию отсортирован от новых к старым."
+        ),
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
+
+    def get_queryset(self):
+        member: Member = self.request.user
+        qs = WalletTransaction.objects.filter(member=member).order_by("-created_at")
+
+        tx_type = self.request.query_params.get("type")
+        if tx_type:
+            qs = qs.filter(type=tx_type)
+
+        return qs
+
+
+class WalletDepositView(APIView):
+    """Create an internal/app-level deposit for the current member's wallet."""
+
+    authentication_classes = [MemberTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        request=WalletDepositRequestSerializer,
+        responses={201: WalletTransactionSerializer},
+        description=(
+            "Пополнить кошелёк текущего пользователя на указанную сумму. "
+            "Используется как внутреннее пополнение (без внешнего платёжного шлюза)."
+        ),
+    )
+    def post(self, request):
+        member: Member = request.user
+        serializer = WalletDepositRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        amount = serializer.validated_data["amount"]
+        description = serializer.validated_data.get("description") or ""
+
+        try:
+            tx = member.deposit(
+                amount,
+                description=description,
+                meta={"source": "api_deposit"},
+            )
+        except ValueError as exc:
+            raise ValidationError({"amount": [str(exc)]})
+
+        output = WalletTransactionSerializer(tx)
+        return Response(output.data, status=status.HTTP_201_CREATED)
+
+
+class WalletSpendView(APIView):
+    """Spend funds from the current member's wallet."""
+
+    authentication_classes = [MemberTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        request=WalletSpendRequestSerializer,
+        responses={201: WalletTransactionSerializer},
+        description=(
+            "Списать средства с кошелька текущего пользователя (оплата участия в клубе, игр и т.п.). "
+            "При недостатке средств возвращает ошибку 400 с кодом 'insufficient_funds'."
+        ),
+    )
+    def post(self, request):
+        member: Member = request.user
+        serializer = WalletSpendRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        amount = serializer.validated_data["amount"]
+        description = serializer.validated_data.get("description") or ""
+        category = serializer.validated_data.get("category") or ""
+
+        meta = {"source": "api_spend"}
+        if category:
+            meta["category"] = category
+
+        try:
+            tx = member.spend(
+                amount,
+                description=description,
+                meta=meta,
+            )
+        except ValueError as exc:
+            message = str(exc)
+            if "Insufficient wallet balance" in message:
+                raise ValidationError(
+                    {"amount": ["Недостаточно средств на кошельке."]},
+                    code="insufficient_funds",
+                )
+            raise ValidationError({"amount": [message]})
+
+        output = WalletTransactionSerializer(tx)
+        return Response(output.data, status=status.HTTP_201_CREATED)
 
 
 class ProfileStatsView(APIView):

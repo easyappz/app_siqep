@@ -123,6 +123,35 @@ class WalletSummarySerializer(serializers.Serializer):
     total_spent = serializers.DecimalField(max_digits=12, decimal_places=2)
 
 
+class WalletDepositRequestSerializer(serializers.Serializer):
+    """Input serializer for wallet deposit operation."""
+
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    description = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError(
+                "Сумма пополнения должна быть положительным числом."
+            )
+        return value
+
+
+class WalletSpendRequestSerializer(serializers.Serializer):
+    """Input serializer for wallet spend operation.""" 
+
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    description = serializers.CharField(required=False, allow_blank=True)
+    category = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError(
+                "Сумма списания должна быть положительным числом."
+            )
+        return value
+
+
 class MemberSerializer(serializers.ModelSerializer):
     """Serializer for public member profile data with ranked referral fields."""
 
@@ -495,7 +524,7 @@ class ChangePasswordSerializer(serializers.Serializer):
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):
-    """Serializer for requesting a password reset code by email or phone."""
+    """Serializer for requesting a password reset code by email or phone.""" 
 
     email = serializers.EmailField(
         required=False,
@@ -674,7 +703,7 @@ class RegistrationsChartPointSerializer(serializers.Serializer):
 
 
 class PlayerDepositHistoryItemSerializer(serializers.Serializer):
-    """Single item for a player's own deposit history."""
+    """Single item for a player's own deposit history.""" 
 
     date = serializers.DateField()
     amount = serializers.IntegerField()
@@ -982,7 +1011,7 @@ class AdminCreateReferralEventSerializer(serializers.Serializer):
 
 
 class AdminRegistrationsByDaySerializer(serializers.Serializer):
-    """Single item for registrations by day on admin dashboard."""
+    """Single item for registrations by day on admin dashboard.""" 
 
     date = serializers.DateField()
     count = serializers.IntegerField()
@@ -1031,7 +1060,7 @@ class AdminStatsOverviewSerializer(serializers.Serializer):
 
 
 class TestReferralChangeSerializer(serializers.Serializer):
-    """Single activated ancestor/descendant relation after a simulated deposit."""
+    """Single activated ancestor/descendant relation after a simulated deposit.""" 
 
     ancestor_id = serializers.IntegerField()
     level = serializers.IntegerField()

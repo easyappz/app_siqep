@@ -171,6 +171,107 @@ paths:
                 $ref: '#/components/schemas/PasswordResetConfirmResponse'
         '400':
           description: 'Неверный или просроченный код, пользователь не найден или ошибка валидации.'
+  /api/wallet/summary/:
+    get:
+      operationId: wallet_summary_retrieve
+      summary: 'Сводка по кошельку текущего пользователя'
+      description: 'Возвращает текущий баланс кошелька и агрегированные суммы пополнений и списаний.'
+      tags:
+        - wallet
+      security:
+        - MemberTokenAuth: []
+      responses:
+        '200':
+          description: 'Сводка по кошельку.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletSummary'
+        '401':
+          description: 'Требуется аутентификация.'
+  /api/wallet/transactions/:
+    get:
+      operationId: wallet_transactions_list
+      summary: 'История операций кошелька текущего пользователя'
+      description: 'Постраничная история операций кошелька, отсортированная от новых к старым. Можно отфильтровать по типу операции.'
+      tags:
+        - wallet
+      security:
+        - MemberTokenAuth: []
+      parameters:
+        - name: type
+          in: query
+          required: false
+          description: 'Фильтр по типу транзакции кошелька (deposit, spend, withdraw, refund, adjustment).'
+          schema:
+            type: string
+            enum:
+              - deposit
+              - spend
+              - withdraw
+              - refund
+              - adjustment
+      responses:
+        '200':
+          description: 'Постраничный список операций кошелька.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedWalletTransactionList'
+        '401':
+          description: 'Требуется аутентификация.'
+  /api/wallet/deposit/:
+    post:
+      operationId: wallet_deposit_create
+      summary: 'Внутреннее пополнение кошелька'
+      description: 'Создаёт внутреннюю операцию пополнения кошелька текущего пользователя (без интеграции с платёжными шлюзами).'
+      tags:
+        - wallet
+      security:
+        - MemberTokenAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WalletDepositRequest'
+      responses:
+        '201':
+          description: 'Операция пополнения кошелька создана.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletTransaction'
+        '400':
+          description: 'Ошибка валидации данных (например, неположительная сумма).'
+        '401':
+          description: 'Требуется аутентификация.'
+  /api/wallet/spend/:
+    post:
+      operationId: wallet_spend_create
+      summary: 'Списание средств из кошелька'
+      description: 'Списывает средства с кошелька текущего пользователя (например, оплата участия в клубе или игр). При недостаточном балансе возвращает ошибку 400 с кодом "insufficient_funds".'
+      tags:
+        - wallet
+      security:
+        - MemberTokenAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WalletSpendRequest'
+      responses:
+        '201':
+          description: 'Операция списания средств успешно создана.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletTransaction'
+        '400':
+          description: 'Ошибка валидации данных (например, неположительная сумма или недостаточно средств).'
+        '401':
+          description: 'Требуется аутентификация.'
   /api/withdrawal-requests/:
     get:
       operationId: withdrawal_requests_list
@@ -733,11 +834,11 @@ components:
         cash_balance:
           type: string
           format: decimal
-          description: 'Текущий денежный баланс пользователя в рублях (исторически использовался как баланс инфлюенсерских вознаграждений, теперь служит источником данных для кошелька).'
+          description: 'Текущий денежный баланс пользователя в рублях (источником служит поле cash_balance в модели Member).'
         wallet_balance:
           type: string
           format: decimal
-          description: 'Текущий баланс кошелька пользователя (денежные средства внутри приложения). Является алиасом поля cash_balance.'
+          description: 'Текущий баланс кошелька пользователя (денежные средства внутри приложения, алиас cash_balance).'
         wallet_total_deposited:
           type: string
           format: decimal
@@ -745,7 +846,7 @@ components:
         wallet_total_spent:
           type: string
           format: decimal
-          description: 'Суммарный объём потраченных средств из кошелька пользователя (агрегировано по WalletTransaction с типом spend/withdraw).'
+          description: 'Суммарный объём трат и выводов из кошелька пользователя (агрегировано по WalletTransaction с типом spend/withdraw).'
         direct_referrals_count:
           type: integer
           description: 'Количество прямых рефералов (уровень 1) в ранговой системе (основано на ReferralRelation).'
@@ -1739,7 +1840,7 @@ components:
             - crypto
         destination:
           type: string
-          description: 'Реквизиты получателя (номер карты или адрес криптокошелька).'
+          description: 'Реквизиты получателя (номер карты или адрес криптокошелёка).'
         status:
           type: string
           description: 'Статус заявки на вывод.'
@@ -1780,7 +1881,7 @@ components:
             - crypto
         destination:
           type: string
-          description: 'Реквизиты получателя (номер карты или адрес криптокошелька).'
+          description: 'Реквизиты получателя (номер карты или адрес криптокошелёка).'
       required:
         - amount
         - method
@@ -1848,6 +1949,59 @@ components:
         - balance
         - total_deposited
         - total_spent
+    WalletDepositRequest:
+      type: object
+      description: 'Данные для внутреннего пополнения кошелька.'
+      properties:
+        amount:
+          type: string
+          format: decimal
+          description: 'Сумма пополнения в рублях.'
+        description:
+          type: string
+          nullable: true
+          description: 'Необязательное описание операции пополнения.'
+      required:
+        - amount
+    WalletSpendRequest:
+      type: object
+      description: 'Данные для списания средств из кошелька.'
+      properties:
+        amount:
+          type: string
+          format: decimal
+          description: 'Сумма списания в рублях.'
+        description:
+          type: string
+          nullable: true
+          description: 'Необязательное описание операции (например, за что было списание).'
+        category:
+          type: string
+          nullable: true
+          description: 'Необязательная категория списания (игра, клуб и т.п.).'
+      required:
+        - amount
+    PaginatedWalletTransactionList:
+      type: object
+      description: 'Страница списка операций кошелька.'
+      properties:
+        count:
+          type: integer
+        next:
+          type: string
+          format: uri
+          nullable: true
+        previous:
+          type: string
+          format: uri
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/WalletTransaction'
+      required:
+        - count
+        - results
   securitySchemes:
     basicAuth:
       type: http
