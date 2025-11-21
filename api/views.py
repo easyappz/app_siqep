@@ -342,16 +342,18 @@ class WalletDepositView(APIView):
 
 
 class WalletSpendView(APIView):
-    """Spend funds from the current member's wallet."""
+    """Spend funds from the current member's wallet (admin-only)."""
 
     authentication_classes = [MemberTokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsAdminMember]
 
     @extend_schema(
         request=WalletSpendRequestSerializer,
         responses={201: WalletTransactionSerializer},
         description=(
-            "Списать средства с кошелька текущего пользователя (оплата участия в клубе, игр и т.п.). "
+            "Списать средства с кошелька текущего пользователя. "
+            "Этот эндпоинт может вызывать только администратор; обычные пользователи "
+            "не могут самостоятельно инициировать списание со своего кошелька. "
             "При недостатке средств возвращает ошибку 400 с кодом 'insufficient_funds'."
         ),
     )
