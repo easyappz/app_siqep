@@ -675,7 +675,7 @@ components:
         - created_at
     Member:
       type: object
-      description: 'Пользователь сервиса (Member) с полями ранговой реферальной системы.'
+      description: 'Пользователь сервиса (Member) с полями ранговой реферальной системы и кошельком.'
       properties:
         id:
           type: integer
@@ -733,7 +733,19 @@ components:
         cash_balance:
           type: string
           format: decimal
-          description: 'Баланс денежных средств (в рублях) для инфлюенсеров.'
+          description: 'Текущий денежный баланс пользователя в рублях (исторически использовался как баланс инфлюенсерских вознаграждений, теперь служит источником данных для кошелька).'
+        wallet_balance:
+          type: string
+          format: decimal
+          description: 'Текущий баланс кошелька пользователя (денежные средства внутри приложения). Является алиасом поля cash_balance.'
+        wallet_total_deposited:
+          type: string
+          format: decimal
+          description: 'Суммарный объём пополнений кошелька пользователя (агрегировано по WalletTransaction с типом deposit).'
+        wallet_total_spent:
+          type: string
+          format: decimal
+          description: 'Суммарный объём потраченных средств из кошелька пользователя (агрегировано по WalletTransaction с типом spend/withdraw).'
         direct_referrals_count:
           type: integer
           description: 'Количество прямых рефералов (уровень 1) в ранговой системе (основано на ReferralRelation).'
@@ -791,6 +803,9 @@ components:
         - rank
         - v_coins_balance
         - cash_balance
+        - wallet_balance
+        - wallet_total_deposited
+        - wallet_total_spent
         - direct_referrals_count
         - active_direct_referrals_count
         - total_deposits
@@ -1770,6 +1785,69 @@ components:
         - amount
         - method
         - destination
+    WalletTransaction:
+      type: object
+      description: 'Запись операции кошелька пользователя.'
+      properties:
+        id:
+          type: integer
+          description: 'Идентификатор транзакции кошелька.'
+        type:
+          type: string
+          description: 'Тип операции кошелька.'
+          enum:
+            - deposit
+            - spend
+            - withdraw
+            - refund
+            - adjustment
+        amount:
+          type: string
+          format: decimal
+          description: 'Абсолютная величина операции в рублях (всегда положительная).'
+        balance_after:
+          type: string
+          format: decimal
+          description: 'Баланс кошелька пользователя после применения операции.'
+        description:
+          type: string
+          nullable: true
+          description: 'Человеко-читаемое описание операции.'
+        meta:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: 'Произвольные дополнительные данные об операции (например, ID депозита или заявки на вывод).'
+        created_at:
+          type: string
+          format: date-time
+          description: 'Дата и время создания операции.'
+      required:
+        - id
+        - type
+        - amount
+        - balance_after
+        - created_at
+    WalletSummary:
+      type: object
+      description: 'Сводная информация по кошельку пользователя.'
+      properties:
+        balance:
+          type: string
+          format: decimal
+          description: 'Текущий баланс кошелька пользователя.'
+        total_deposited:
+          type: string
+          format: decimal
+          description: 'Общая сумма всех пополнений кошелька (DEPOSIT).'
+        total_spent:
+          type: string
+          format: decimal
+          description: 'Общая сумма всех трат и выводов из кошелька (SPEND + WITHDRAW).'
+      required:
+        - balance
+        - total_deposited
+        - total_spent
   securitySchemes:
     basicAuth:
       type: http

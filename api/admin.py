@@ -6,6 +6,7 @@ from .models import (
     MemberAuthToken,
     ReferralRelation,
     RankRule,
+    WalletTransaction,
 )
 
 
@@ -115,3 +116,32 @@ class RankRuleAdmin(admin.ModelAdmin):
     )
     search_fields = ("rank",)
     ordering = ("required_referrals",)
+
+
+@admin.register(WalletTransaction)
+class WalletTransactionAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "member",
+        "type",
+        "amount",
+        "balance_after",
+        "created_at",
+    )
+    list_filter = ("type", "created_at")
+    search_fields = (
+        "member__first_name",
+        "member__last_name",
+        "member__phone",
+    )
+    readonly_fields = (
+        "member",
+        "type",
+        "amount",
+        "balance_after",
+        "description",
+        "meta",
+        "created_at",
+        "updated_at",
+    )
+    ordering = ("-created_at",)

@@ -23,6 +23,7 @@ from .models import (
     MemberAuthToken,
     PasswordResetCode,
     ReferralEvent,
+    WalletTransaction,
 )
 from .referral_utils import (
     get_rank_multiplier,
@@ -31,6 +32,87 @@ from .referral_utils import (
     on_user_first_tournament_completed,
     on_member_deposit,
 )
+
+
+class WalletModelTests(TestCase):
+    """Tests for core wallet operations on Member and WalletTransaction."""
+
+    def setUp(self):
+        self.member = Member(
+            first_name="Wallet",
+            last_name="User",
+            phone="+79990006666",
+            email=None,
+            is_influencer=False,
+            is_admin=False,
+        )
+        self.member.set_password("wallet123")
+        self.member.save()
+
+        self.influencer = Member(
+            first_name="WalletInfluencer",
+            last_name="User",
+            phone="+79990007777",
+            email=None,
+            is_influencer=True,
+            is_admin=False,
+            user_type=USER_TYPE_INFLUENCER,
+        )
+        self.influencer.set_password("wallet123")
+        self.influencer.save()
+
+    def test_deposit_creates_transaction_and_increases_balance(self):
+        amount = Decimal("100.50")
+
+        tx = self.member.deposit(amount, description="Test deposit")
+
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.cash_balance, amount)
+
+        self.assertIsNotNone(tx)
+        self.assertEqual(tx.member, self.member)
+        self.assertEqual(tx.type, WalletTransaction.Type.DEPOSIT)
+        self.assertEqual(tx.amount, amount)
+        self.assertEqual(tx.balance_after, amount)
+
+        self.assertEqual(
+            WalletTransaction.objects.filter(member=self.member).count(),
+            1,
+        )
+
+    def test_spend_more_than_balance_raises_error_and_creates_no_transaction(self):
+        amount = Decimal("50.00")
+
+        with self.assertRaises(ValueError):
+            self.member.spend(amount, description="Should fail")
+
+        self.assertEqual(
+            WalletTransaction.objects.filter(member=self.member).count(),
+            0,
+        )
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.cash_balance, Decimal("0.00"))
+
+    def test_influencer_wallet_behaves_same_as_regular_member(self):
+        deposit_amount = Decimal("200.00")
+        spend_amount = Decimal("50.00")
+
+        self.influencer.deposit(deposit_amount, description="Influencer deposit")
+        self.influencer.spend(spend_amount, description="Influencer spend")
+
+        self.influencer.refresh_from_db()
+        expected_balance = deposit_amount - spend_amount
+        self.assertEqual(self.influencer.cash_balance, expected_balance)
+
+        tx_types = list(
+            WalletTransaction.objects.filter(member=self.influencer)
+            .order_by("created_at")
+            .values_list("type", flat=True)
+        )
+        self.assertEqual(
+            tx_types,
+            [WalletTransaction.Type.DEPOSIT, WalletTransaction.Type.SPEND],
+        )
 
 
 class RankedReferralLogicTests(TestCase):
@@ -472,8 +554,8 @@ class TestSimulateDemoDepositsAPITests(TestCase):
         timur_after_second = self.timur.cash_balance
         self.assertEqual(timur_after_second, timur_after_first)
 
-        timур_data = data2["timur"]
-        earnings_delta = Decimal(str(timур_data["earnings_delta"]))
+        timur_data = data2["timur"]
+        earnings_delta = Decimal(str(timur_data["earnings_delta"]))
         self.assertEqual(earnings_delta, Decimal("0.00"))
 
         for phone in players_phones:

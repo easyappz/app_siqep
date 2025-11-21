@@ -2,6 +2,7 @@ from datetime import timedelta
 import secrets
 
 from django.utils import timezone
+from django.db.models import Sum
 from rest_framework import serializers
 
 from .models import (
@@ -13,6 +14,7 @@ from .models import (
     Deposit,
     WithdrawalRequest,
     PasswordResetCode,
+    WalletTransaction,
 )
 from .referral_utils import (
     on_new_user_registered,
@@ -96,6 +98,31 @@ class WithdrawalRequestSerializer(serializers.ModelSerializer):
         return value
 
 
+class WalletTransactionSerializer(serializers.ModelSerializer):
+    """Serializer for individual wallet transactions."""
+
+    class Meta:
+        model = WalletTransaction
+        fields = [
+            "id",
+            "type",
+            "amount",
+            "balance_after",
+            "description",
+            "meta",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class WalletSummarySerializer(serializers.Serializer):
+    """Aggregated wallet summary for a member."""
+
+    balance = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_deposited = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_spent = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
 class MemberSerializer(serializers.ModelSerializer):
     """Serializer for public member profile data with ranked referral fields."""
 
@@ -109,6 +136,9 @@ class MemberSerializer(serializers.ModelSerializer):
     referred_members_count = serializers.SerializerMethodField()
     available_for_withdrawal = serializers.SerializerMethodField()
     last_withdrawal_request = serializers.SerializerMethodField()
+    wallet_balance = serializers.SerializerMethodField()
+    wallet_total_deposited = serializers.SerializerMethodField()
+    wallet_total_spent = serializers.SerializerMethodField()
 
     class Meta:
         model = Member
@@ -128,6 +158,9 @@ class MemberSerializer(serializers.ModelSerializer):
             "rank",
             "v_coins_balance",
             "cash_balance",
+            "wallet_balance",
+            "wallet_total_deposited",
+            "wallet_total_spent",
             "direct_referrals_count",
             "active_direct_referrals_count",
             "current_rank_rule",
@@ -152,6 +185,9 @@ class MemberSerializer(serializers.ModelSerializer):
             "rank",
             "v_coins_balance",
             "cash_balance",
+            "wallet_balance",
+            "wallet_total_deposited",
+            "wallet_total_spent",
             "direct_referrals_count",
             "active_direct_referrals_count",
             "current_rank_rule",
@@ -232,6 +268,41 @@ class MemberSerializer(serializers.ModelSerializer):
         if request_obj is None:
             return None
         return WithdrawalRequestSerializer(request_obj).data
+
+    def get_wallet_balance(self, obj: Member) -> str:
+        """Return current wallet balance (aliased to cash_balance) as string."""
+
+        balance = getattr(obj, "wallet_balance", None)
+        if balance is None:
+            return "0.00"
+        return str(balance)
+
+    def get_wallet_total_deposited(self, obj: Member) -> str:
+        """Total amount ever deposited into the member's wallet."""
+
+        total = (
+            obj.wallet_transactions.filter(
+                type=WalletTransaction.Type.DEPOSIT,
+            ).aggregate(total=Sum("amount"))["total"]
+        )
+        if total is None:
+            return "0.00"
+        return str(total)
+
+    def get_wallet_total_spent(self, obj: Member) -> str:
+        """Total amount ever spent or withdrawn from the member's wallet."""
+
+        total = (
+            obj.wallet_transactions.filter(
+                type__in=[
+                    WalletTransaction.Type.SPEND,
+                    WalletTransaction.Type.WITHDRAW,
+                ],
+            ).aggregate(total=Sum("amount"))["total"]
+        )
+        if total is None:
+            return "0.00"
+        return str(total)
 
 
 class RegistrationSerializer(serializers.Serializer):

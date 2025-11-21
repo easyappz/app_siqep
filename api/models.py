@@ -2,7 +2,7 @@ import secrets
 from decimal import Decimal
 
 from django.contrib.auth.hashers import check_password, make_password
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Sum
 from django.db.models.signals import post_save
 from django.dispatch import receiver
@@ -149,6 +149,23 @@ class Member(models.Model):
         return self.user_type == USER_TYPE_INFLUENCER
 
     @property
+    def wallet_balance(self) -> Decimal:
+        """Unified wallet balance backed by cash_balance.
+
+        All members (players and influencers) use this as their spendable
+        in-app money balance.
+        """
+
+        if self.cash_balance is None:
+            return Decimal("0.00")
+        return self.cash_balance
+
+    def get_balance(self) -> Decimal:
+        """Return the current wallet balance for this member."""
+
+        return self.wallet_balance
+
+    @property
     def total_deposits(self) -> Decimal:
         """Return the total sum of all deposits for this member.
 
@@ -220,7 +237,7 @@ class Member(models.Model):
         return f"REF{self.pk}{random_suffix}"
 
     def save(self, *args, **kwargs) -> None:
-        """Ensure a referral_code is generated on first save and influencer_since is set correctly.""" 
+        """Ensure a referral_code is generated on first save and influencer_since is set correctly."""
         is_new = self.pk is None
 
         previous = None
@@ -249,6 +266,110 @@ class Member(models.Model):
         if is_new and not self.referral_code:
             self.referral_code = self.generate_referral_code()
             super().save(update_fields=["referral_code"])
+
+    def _apply_wallet_change(
+        self,
+        delta: Decimal,
+        tx_type: str,
+        description: str | None = None,
+        meta: dict | None = None,
+    ) -> "WalletTransaction":
+        """Internal helper to change wallet balance and create a transaction.
+
+        delta > 0 means credit, delta < 0 means debit. Resulting balance
+        is clamped to not go below zero.
+        """
+
+        if delta == 0:
+            raise ValueError("Amount must be non-zero.")
+
+        with transaction.atomic():
+            locked = Member.objects.select_for_update().get(pk=self.pk)
+            current_balance = locked.cash_balance or Decimal("0.00")
+            new_balance = current_balance + delta
+            if new_balance < Decimal("0.00"):
+                raise ValueError("Insufficient wallet balance.")
+
+            new_balance = new_balance.quantize(Decimal("0.01"))
+            amount = abs(delta).quantize(Decimal("0.01"))
+
+            tx = WalletTransaction.objects.create(
+                member=locked,
+                type=tx_type,
+                amount=amount,
+                balance_after=new_balance,
+                description=description or "",
+                meta=meta or None,
+            )
+
+            locked.cash_balance = new_balance
+            locked.save(update_fields=["cash_balance"])
+
+        # Keep the in-memory instance in sync
+        self.cash_balance = new_balance
+        return tx
+
+    def deposit(
+        self,
+        amount: Decimal,
+        description: str | None = None,
+        meta: dict | None = None,
+    ) -> "WalletTransaction":
+        """Credit the member's wallet by the given positive amount.
+
+        Creates a DEPOSIT transaction and updates the cached balance atomically.
+        """
+
+        if amount <= 0:
+            raise ValueError("Deposit amount must be positive.")
+        return self._apply_wallet_change(
+            delta=amount,
+            tx_type=WalletTransaction.Type.DEPOSIT,
+            description=description,
+            meta=meta,
+        )
+
+    def spend(
+        self,
+        amount: Decimal,
+        description: str | None = None,
+        meta: dict | None = None,
+    ) -> "WalletTransaction":
+        """Debit the member's wallet by the given positive amount.
+
+        Raises ValueError if the balance is insufficient. Creates a SPEND
+        transaction and updates the cached balance atomically.
+        """
+
+        if amount <= 0:
+            raise ValueError("Spend amount must be positive.")
+        return self._apply_wallet_change(
+            delta=-amount,
+            tx_type=WalletTransaction.Type.SPEND,
+            description=description,
+            meta=meta,
+        )
+
+    def adjust_balance(
+        self,
+        delta: Decimal,
+        description: str | None = None,
+        meta: dict | None = None,
+    ) -> "WalletTransaction":
+        """Manually adjust wallet balance by delta.
+
+        Intended for admin-only corrections. Positive delta credits the
+        wallet, negative delta debits it (cannot result in negative balance).
+        """
+
+        if delta == 0:
+            raise ValueError("Adjustment amount must be non-zero.")
+        return self._apply_wallet_change(
+            delta=delta,
+            tx_type=WalletTransaction.Type.ADJUSTMENT,
+            description=description,
+            meta=meta,
+        )
 
 
 class Deposit(models.Model):
@@ -436,6 +557,76 @@ class WithdrawalRequest(models.Model):
     def __str__(self) -> str:
         return f"WithdrawalRequest {self.id} member={self.member_id} amount={self.amount}"
 
+    def mark_as_paid(self) -> "WalletTransaction | None":
+        """Mark this withdrawal as paid and deduct funds from the member wallet.
+
+        Deduction is performed via Member.spend and is atomic with the status
+        update. If the request is already paid, this is a no-op.
+        """
+
+        if self.status == self.Status.PAID:
+            return None
+
+        with transaction.atomic():
+            locked = (
+                WithdrawalRequest.objects.select_for_update()
+                .select_related("member")
+                .get(pk=self.pk)
+            )
+            if locked.status == self.Status.PAID:
+                return None
+
+            member = locked.member
+            tx = member.spend(
+                locked.amount,
+                description="Withdrawal payout",
+                meta={"withdrawal_request_id": locked.id},
+            )
+
+            locked.status = self.Status.PAID
+            locked.processed_at = timezone.now()
+            locked.save(update_fields=["status", "processed_at"])
+
+        # Keep in-memory state in sync
+        self.status = locked.status
+        self.processed_at = locked.processed_at
+        return tx
+
+
+class WalletTransaction(models.Model):
+    class Type(models.TextChoices):
+        DEPOSIT = "deposit", "Deposit"
+        SPEND = "spend", "Spend"
+        WITHDRAW = "withdraw", "Withdraw"
+        REFUND = "refund", "Refund"
+        ADJUSTMENT = "adjustment", "Adjustment"
+
+    id = models.AutoField(primary_key=True)
+    member = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="wallet_transactions",
+    )
+    type = models.CharField(
+        max_length=32,
+        choices=Type.choices,
+    )
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    balance_after = models.DecimalField(max_digits=12, decimal_places=2)
+    description = models.TextField(blank=True, default="")
+    meta = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return (
+            f"WalletTransaction(id={self.id}, member={self.member_id}, "
+            f"type={self.type}, amount={self.amount})"
+        )
+
 
 class MemberAuthToken(models.Model):
     key = models.CharField(primary_key=True, max_length=64, editable=False)
@@ -500,6 +691,9 @@ def handle_deposit_post_save(sender, instance: "Deposit", created: bool, **kwarg
     - create a corresponding ReferralEvent for analytics (if there is a referrer),
     - trigger first-tournament bonuses if this is the first qualifying deposit,
     - apply 10% influencer commission for the direct influencer referrer.
+
+    Additionally, the deposited amount is credited to the member's unified
+    wallet balance via Member.deposit.
     """
 
     if not created:
@@ -511,4 +705,18 @@ def handle_deposit_post_save(sender, instance: "Deposit", created: bool, **kwarg
     # Import lazily to avoid circular imports at module load time.
     from .referral_utils import process_deposit_for_referrals
 
+    # Apply referral logic based on this deposit
     process_deposit_for_referrals(instance)
+
+    # Credit the member's wallet with the deposited amount
+    member = instance.member
+    if member is not None:
+        try:
+            member.deposit(
+                instance.amount,
+                description="External deposit",
+                meta={"deposit_id": instance.id, "currency": instance.currency},
+            )
+        except ValueError:
+            # In case of unexpected negative/zero amounts, just skip wallet update
+            pass
