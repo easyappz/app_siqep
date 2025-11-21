@@ -27,6 +27,43 @@ class MessageSerializer(serializers.Serializer):
     timestamp = serializers.DateTimeField(read_only=True)
 
 
+class ChangePasswordSerializer(serializers.Serializer):
+    old_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True, min_length=6)
+    confirm_new_password = serializers.CharField(write_only=True)
+
+    def _get_member(self):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not isinstance(user, Member):
+            raise serializers.ValidationError(
+                "Необходимо выполнить вход в систему."
+            )
+        return user
+
+    def validate_old_password(self, value):
+        member = self._get_member()
+        if not member.check_password(value):
+            raise serializers.ValidationError("Текущий пароль указан неверно.")
+        return value
+
+    def validate(self, attrs):
+        new_password = attrs.get("new_password")
+        confirm_new_password = attrs.get("confirm_new_password")
+
+        if new_password != confirm_new_password:
+            raise serializers.ValidationError(
+                {"confirm_new_password": "Новые пароли не совпадают."}
+            )
+
+        if new_password and len(new_password) < 6:
+            raise serializers.ValidationError(
+                {"new_password": "Пароль должен содержать не менее 6 символов."}
+            )
+
+        return attrs
+
+
 class MemberReferrerSerializer(serializers.ModelSerializer):
     """Minimal serializer for referrer information."""
 
@@ -397,102 +434,4 @@ class RegistrationSerializer(serializers.Serializer):
         return value
 
     def validate_email(self, value: str) -> str:
-        """Ensure email is unique (if provided) with a Russian error message."""
-        if not value:
-            return value
-        if Member.objects.filter(email=value).exists():
-            raise serializers.ValidationError(
-                "Пользователь с такой электронной почтой уже существует."
-            )
-        return value
-
-    def validate_password(self, value: str) -> str:
-        """Basic password validation without regular expressions."""
-        if len(value) < 6:
-            raise serializers.ValidationError(
-                "Пароль должен содержать не менее 6 символов."
-            )
-        return value
-
-    def validate(self, attrs):
-        """Validate referral_code if provided and resolve referrer Member.
-
-        Stores resolved referrer in attrs["referrer"] for later use in create().
-        """
-        referral_code = attrs.get("referral_code") or ""
-        if referral_code:
-            try:
-                referrer = Member.objects.get(referral_code=referral_code)
-            except Member.DoesNotExist:
-                raise serializers.ValidationError(
-                    {"referral_code": "Указанный реферальный код не найден."}
-                )
-            attrs["referrer"] = referrer
-        return attrs
-
-    def create(self, validated_data: dict) -> Member:
-        """Create a new Member and apply referral business logic.
-
-        - The direct referrer receives a ReferralEvent with deposit_amount = 1000
-          (для статистики и обратной совместимости).
-        - The deep referral tree is constructed via `on_new_user_registered`.
-        - Финансовые бонусы (V-Coins/₽) начисляются позже, когда реферал
-          завершает свой первый платный турнир/депозит.
-        """
-
-        referrer = validated_data.pop("referrer", None)
-        # Remove non-model fields
-        validated_data.pop("referral_code", None)
-        raw_password = validated_data.pop("password")
-
-        # Normalize empty email to None
-        email = validated_data.get("email")
-        if email == "":
-            validated_data["email"] = None
-
-        member = Member(
-            first_name=validated_data.get("first_name", ""),
-            last_name=validated_data.get("last_name", ""),
-            phone=validated_data.get("phone", ""),
-            email=validated_data.get("email"),
-        )
-        member.set_password(raw_password)
-        member.save()
-
-        if referrer is not None:
-            # Safety check against hypothetical self-referral.
-            if referrer.id == member.id:
-                raise serializers.ValidationError(
-                    "Пользователь не может использовать собственный реферальный код."
-                )
-
-            # Keep legacy field and new referrer field in sync.
-            member.referred_by = referrer
-            member.referrer = referrer
-            member.save(update_fields=["referred_by", "referrer"])
-
-            deposit_amount = 1000
-            if referrer.is_influencer:
-                bonus_amount = 0
-                money_amount = deposit_amount
-            else:
-                bonus_amount = 1
-                money_amount = 0
-
-            # Keep ReferralEvent for analytics and backward-compatible admin views.
-            ReferralEvent.objects.create(
-                referrer=referrer,
-                referred=member,
-                bonus_amount=bonus_amount,
-                money_amount=money_amount,
-                deposit_amount=deposit_amount,
-            )
-
-            # New referral graph for ranked system.
-            on_new_user_registered(member)
-
-        return member
-
-
-class LoginSerializer(serializers.Serializer):
-    """Serializer used for login by phone and password."""
+        """Ensure email is уникаль...
