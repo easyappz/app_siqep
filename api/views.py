@@ -24,4 +24,13 @@ from .models import (
     WalletTransaction,
 )
 from .permissions import IsAdminMember
-from .referral_utils include omitted??
+from .referral_utils import (
+    check_for_rank_up,
+    get_rank_multiplier,
+    on_member_deposit,
+    on_new_user_registered,
+    on_user_first_tournament_completed,
+    process_member_deposit,
+    simulate_business_model,
+    simulate_demo_deposits_for_amir_alfira,
+)
