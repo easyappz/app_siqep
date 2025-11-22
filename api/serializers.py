@@ -138,7 +138,7 @@ class WalletDepositRequestSerializer(serializers.Serializer):
 
 
 class WalletSpendRequestSerializer(serializers.Serializer):
-    """Input serializer for wallet spend operation.""" 
+    """Input serializer for wallet spend operation."""
 
     amount = serializers.DecimalField(max_digits=12, decimal_places=2)
     description = serializers.CharField(required=False, allow_blank=True)
@@ -182,7 +182,6 @@ class MemberSerializer(serializers.ModelSerializer):
             "referral_code",
             "referred_by",
             "created_at",
-            # Ranked referral system fields
             "user_type",
             "rank",
             "v_coins_balance",
@@ -195,7 +194,6 @@ class MemberSerializer(serializers.ModelSerializer):
             "current_rank_rule",
             "withdrawal_bank_details",
             "withdrawal_crypto_wallet",
-            # Deposit and earnings aggregates
             "total_deposits",
             "total_influencer_earnings",
             "deposits",
@@ -231,7 +229,6 @@ class MemberSerializer(serializers.ModelSerializer):
         ]
 
     def get_direct_referrals_count(self, obj: Member) -> int:
-        """Number of unique level-1 referrals for the member in the ranked system."""
         return (
             ReferralRelation.objects.filter(ancestor=obj, level=1)
             .values("descendant_id")
@@ -240,7 +237,6 @@ class MemberSerializer(serializers.ModelSerializer):
         )
 
     def get_active_direct_referrals_count(self, obj: Member) -> int:
-        """Number of active level-1 referrals (has_paid_first_bonus=True)."""
         return (
             ReferralRelation.objects.filter(
                 ancestor=obj,
@@ -253,7 +249,6 @@ class MemberSerializer(serializers.ModelSerializer):
         )
 
     def get_current_rank_rule(self, obj: Member):
-        """Return the RankRule configuration for the member's current rank."""
         if not obj.rank:
             return None
         try:
@@ -267,48 +262,39 @@ class MemberSerializer(serializers.ModelSerializer):
         }
 
     def get_total_deposits(self, obj: Member):
-        """Return the total deposits amount for the member as a decimal string."""
         total = getattr(obj, "total_deposits", None)
         if total is None:
             return "0.00"
         return str(total)
 
     def get_total_influencer_earnings(self, obj: Member):
-        """Return the total influencer earnings for the member as a decimal string."""
         total = getattr(obj, "total_influencer_earnings", None)
         if total is None:
             return "0.00"
         return str(total)
 
     def get_referred_members_count(self, obj: Member) -> int:
-        """Return count of direct referred members (level 1)."""
         return self.get_direct_referrals_count(obj)
 
     def get_available_for_withdrawal(self, obj: Member) -> str:
-        """Return available influencer earnings for withdrawal as a decimal string."""
         available = getattr(obj, "available_for_withdrawal", None)
         if available is None:
             return "0.00"
         return str(available)
 
     def get_last_withdrawal_request(self, obj: Member):
-        """Return the latest withdrawal request data for the member, if any."""
         request_obj = obj.withdrawal_requests.order_by("-created_at").first()
         if request_obj is None:
             return None
         return WithdrawalRequestSerializer(request_obj).data
 
     def get_wallet_balance(self, obj: Member) -> str:
-        """Return current wallet balance (aliased to cash_balance) as string."""
-
         balance = getattr(obj, "wallet_balance", None)
         if balance is None:
             return "0.00"
         return str(balance)
 
     def get_wallet_total_deposited(self, obj: Member) -> str:
-        """Total amount ever deposited into the member's wallet."""
-
         total = (
             obj.wallet_transactions.filter(
                 type=WalletTransaction.Type.DEPOSIT,
@@ -319,8 +305,6 @@ class MemberSerializer(serializers.ModelSerializer):
         return str(total)
 
     def get_wallet_total_spent(self, obj: Member) -> str:
-        """Total amount ever spent or withdrawn from the member's wallet."""
-
         total = (
             obj.wallet_transactions.filter(
                 type__in=[
@@ -335,22 +319,6 @@ class MemberSerializer(serializers.ModelSerializer):
 
 
 class RegistrationSerializer(serializers.Serializer):
-    """Serializer used for public registration endpoint.
-
-    Creates a new Member and optionally links it to a referrer by referral_code.
-
-    When a new member is successfully registered with a referrer, the following
-    business logic is applied (new ranked referral system):
-    - The direct referrer receives a ReferralEvent with a fixed deposit_amount
-      (1000 ₽ – стартовый стек) for backward-compatible analytics.
-    - The ranked referral tree (ReferralRelation) is built via
-      `on_new_user_registered`, so that first-tournament logic can later
-      distribute V-Coins/₽ rewards in depth.
-    - Monetary and V-Coins rewards are *not* granted at registration time.
-      They are granted when the new member completes their first paid
-      tournament / qualifying deposit via `on_user_first_tournament_completed`.
-    """
-
     first_name = serializers.CharField(max_length=100)
     last_name = serializers.CharField(max_length=100)
     phone = serializers.CharField(max_length=32)
@@ -359,7 +327,6 @@ class RegistrationSerializer(serializers.Serializer):
     referral_code = serializers.CharField(required=False, allow_blank=True)
 
     def validate_phone(self, value: str) -> str:
-        """Ensure phone is unique with a Russian error message."""
         if Member.objects.filter(phone=value).exists():
             raise serializers.ValidationError(
                 "Пользователь с таким номером телефона уже существует."
@@ -367,7 +334,6 @@ class RegistrationSerializer(serializers.Serializer):
         return value
 
     def validate_email(self, value: str) -> str:
-        """Ensure email is unique (if provided) with a Russian error message."""
         if not value:
             return value
         if Member.objects.filter(email=value).exists():
@@ -377,7 +343,6 @@ class RegistrationSerializer(serializers.Serializer):
         return value
 
     def validate_password(self, value: str) -> str:
-        """Basic password validation without regular expressions."""
         if len(value) < 6:
             raise serializers.ValidationError(
                 "Пароль должен содержать не менее 6 символов."
@@ -385,10 +350,6 @@ class RegistrationSerializer(serializers.Serializer):
         return value
 
     def validate(self, attrs):
-        """Validate referral_code if provided and resolve referrer Member.
-
-        Stores resolved referrer in attrs["referrer"] for later use in create().
-        """
         referral_code = attrs.get("referral_code") or ""
         if referral_code:
             try:
@@ -401,21 +362,10 @@ class RegistrationSerializer(serializers.Serializer):
         return attrs
 
     def create(self, validated_data: dict) -> Member:
-        """Create a new Member and apply referral business logic.
-
-        - The direct referrer receives a ReferralEvent with deposit_amount = 1000
-          (для статистики и обратной совместимости).
-        - The deep referral tree is constructed via `on_new_user_registered`.
-        - Финансовые бонусы (V-Coins/₽) начисляются позже, когда реферал
-          завершает свой первый платный турнир/депозит.
-        """
-
         referrer = validated_data.pop("referrer", None)
-        # Remove non-model fields
         validated_data.pop("referral_code", None)
         raw_password = validated_data.pop("password")
 
-        # Normalize empty email to None
         email = validated_data.get("email")
         if email == "":
             validated_data["email"] = None
@@ -430,13 +380,11 @@ class RegistrationSerializer(serializers.Serializer):
         member.save()
 
         if referrer is not None:
-            # Safety check against hypothetical self-referral.
             if referrer.id == member.id:
                 raise serializers.ValidationError(
                     "Пользователь не может использовать собственный реферальный код."
                 )
 
-            # Keep legacy field and new referrer field in sync.
             member.referred_by = referrer
             member.referrer = referrer
             member.save(update_fields=["referred_by", "referrer"])
@@ -449,7 +397,6 @@ class RegistrationSerializer(serializers.Serializer):
                 bonus_amount = 1
                 money_amount = 0
 
-            # Keep ReferralEvent for analytics and backward-compatible admin views.
             ReferralEvent.objects.create(
                 referrer=referrer,
                 referred=member,
@@ -458,15 +405,12 @@ class RegistrationSerializer(serializers.Serializer):
                 deposit_amount=deposit_amount,
             )
 
-            # New referral graph for ranked system.
             on_new_user_registered(member)
 
         return member
 
 
 class LoginSerializer(serializers.Serializer):
-    """Serializer used for login by phone and password."""
-
     phone = serializers.CharField()
     password = serializers.CharField(write_only=True)
 
@@ -496,8 +440,6 @@ class LoginSerializer(serializers.Serializer):
 
 
 class ChangePasswordSerializer(serializers.Serializer):
-    """Serializer for changing the current member password."""
-
     old_password = serializers.CharField(write_only=True)
     new_password = serializers.CharField(write_only=True)
 
@@ -524,8 +466,6 @@ class ChangePasswordSerializer(serializers.Serializer):
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):
-    """Serializer for requesting a password reset code by email or phone.""" 
-
     email = serializers.EmailField(
         required=False,
         allow_null=True,
@@ -567,7 +507,6 @@ class PasswordResetRequestSerializer(serializers.Serializer):
     def create(self, validated_data):
         member: Member = validated_data["member"]
 
-        # Mark all previous unused codes for this member as used to prevent reuse.
         PasswordResetCode.objects.filter(
             member=member,
             is_used=False,
@@ -591,8 +530,6 @@ class PasswordResetRequestSerializer(serializers.Serializer):
 
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
-    """Serializer for confirming a reset code and setting a new password."""
-
     email = serializers.EmailField(
         required=False,
         allow_null=True,
@@ -660,8 +597,6 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
 
 class MeUpdateSerializer(serializers.ModelSerializer):
-    """Serializer for updating the current member's profile and payout details."""
-
     class Meta:
         model = Member
         fields = [
@@ -687,8 +622,6 @@ class MeUpdateSerializer(serializers.ModelSerializer):
 
 
 class ReferralHistoryItemSerializer(serializers.Serializer):
-    """Single item for referral history list."""
-
     date = serializers.DateField()
     referred_name = serializers.CharField()
     bonus_amount = serializers.IntegerField()
@@ -696,25 +629,16 @@ class ReferralHistoryItemSerializer(serializers.Serializer):
 
 
 class RegistrationsChartPointSerializer(serializers.Serializer):
-    """Chart point: registrations per day."""
-
     date = serializers.DateField()
     count = serializers.IntegerField()
 
 
 class PlayerDepositHistoryItemSerializer(serializers.Serializer):
-    """Single item for a player's own deposit history.""" 
-
     date = serializers.DateField()
     amount = serializers.IntegerField()
 
 
 class ProfileStatsSerializer(serializers.Serializer):
-    """Aggregated profile statistics for a member.
-
-    active_referrals is defined as referrals created within the last 30 days.
-    """
-
     total_referrals = serializers.IntegerField()
     active_referrals = serializers.IntegerField()
     total_bonus_points = serializers.IntegerField()
@@ -727,11 +651,6 @@ class ProfileStatsSerializer(serializers.Serializer):
 
 
 class ReferralNodeSerializer(serializers.Serializer):
-    """Serializer for a single descendant in the ranked referral tree.
-
-    Based on ReferralRelation entries for a given ancestor.
-    """
-
     descendant_id = serializers.IntegerField()
     level = serializers.IntegerField()
     has_paid_first_bonus = serializers.BooleanField()
@@ -742,8 +661,6 @@ class ReferralNodeSerializer(serializers.Serializer):
 
 
 class ReferralRewardSerializer(serializers.ModelSerializer):
-    """Serializer for individual referral rewards."""
-
     source_member_name = serializers.CharField(
         source="source_member.phone",
         read_only=True,
@@ -764,8 +681,6 @@ class ReferralRewardSerializer(serializers.ModelSerializer):
 
 
 class ReferralRewardsSummarySerializer(serializers.Serializer):
-    """Aggregated summary for referral rewards of a member."""
-
     total_stack_count = serializers.IntegerField()
     total_influencer_amount = serializers.DecimalField(
         max_digits=12,
@@ -781,14 +696,7 @@ class ReferralRewardsSummarySerializer(serializers.Serializer):
     )
 
 
-# ============================
-# Admin-facing serializers
-# ============================
-
-
 class AdminMemberSerializer(serializers.ModelSerializer):
-    """Serializer for listing and managing members in the admin panel."""
-
     referred_by = MemberReferrerSerializer(read_only=True)
     total_referrals = serializers.SerializerMethodField()
     total_bonus_points = serializers.IntegerField(read_only=True)
@@ -826,8 +734,6 @@ class AdminMemberSerializer(serializers.ModelSerializer):
 
 
 class AdminCreateMemberSerializer(serializers.ModelSerializer):
-    """Serializer for creating members (including influencers/admins) via admin panel."""
-
     password = serializers.CharField(write_only=True, min_length=6)
 
     class Meta:
@@ -863,7 +769,6 @@ class AdminCreateMemberSerializer(serializers.ModelSerializer):
     def create(self, validated_data: dict) -> Member:
         raw_password = validated_data.pop("password")
 
-        # Normalize empty email to None
         email = validated_data.get("email")
         if email == "":
             validated_data["email"] = None
@@ -882,12 +787,6 @@ class AdminCreateMemberSerializer(serializers.ModelSerializer):
 
 
 class AdminResetMemberPasswordSerializer(serializers.Serializer):
-    """Serializer for admin-initiated member password reset.
-
-    new_password is optional; if not provided or empty, a random password
-    will be generated by the view.
-    """
-
     new_password = serializers.CharField(
         write_only=True,
         required=False,
@@ -906,8 +805,6 @@ class AdminResetMemberPasswordSerializer(serializers.Serializer):
 
 
 class ReferralEventAdminSerializer(serializers.ModelSerializer):
-    """Serializer for referral events listing in the admin panel."""
-
     referrer = serializers.SerializerMethodField()
     referred = serializers.SerializerMethodField()
     referrer_is_influencer = serializers.SerializerMethodField()
@@ -944,18 +841,6 @@ class ReferralEventAdminSerializer(serializers.ModelSerializer):
 
 
 class AdminCreateReferralEventSerializer(serializers.Serializer):
-    """Serializer for creating referral/deposit events from the admin panel.
-
-    This serializer records a concrete deposit (stack/rebuy) for a referred member
-    and applies business rules for the ranked referral system.
-
-    - For the first qualifying tournament/deposit of a referred member,
-      `on_user_first_tournament_completed` is called once to distribute deep
-      one-time bonuses in V-Coins/₽ across the referral tree.
-    - For every deposit, `on_member_deposit` is called to apply the lifetime
-      10% commission to the direct influencer referrer (if any).
-    """
-
     referred_id = serializers.IntegerField(help_text="ID приглашённого игрока (Member.id).")
     deposit_amount = serializers.IntegerField(
         min_value=1,
@@ -986,8 +871,6 @@ class AdminCreateReferralEventSerializer(serializers.Serializer):
                 {"referred_id": "Пользователь с указанным ID не найден."}
             )
 
-        # For new logic we prefer the explicit `referrer` field, but for
-        # backward compatibility we also accept legacy `referred_by`.
         referrer = referred.referrer or referred.referred_by
         if referrer is None:
             raise serializers.ValidationError(
@@ -1011,18 +894,11 @@ class AdminCreateReferralEventSerializer(serializers.Serializer):
 
 
 class AdminRegistrationsByDaySerializer(serializers.Serializer):
-    """Single item for registrations by day on admin dashboard.""" 
-
     date = serializers.DateField()
     count = serializers.IntegerField()
 
 
 class AdminTopReferrerSerializer(serializers.Serializer):
-    """Top referrer item for admin dashboard.
-
-    Aggregated by ReferralEvent.
-    """
-
     id = serializers.IntegerField()
     first_name = serializers.CharField()
     last_name = serializers.CharField()
@@ -1033,42 +909,23 @@ class AdminTopReferrerSerializer(serializers.Serializer):
 
 
 class AdminIncomeBySourceSerializer(serializers.Serializer):
-    """Income breakdown for admin dashboard."""
-
     total_income = serializers.IntegerField()
     income_from_influencers = serializers.IntegerField()
     income_from_regular_users = serializers.IntegerField()
 
 
 class AdminStatsOverviewSerializer(serializers.Serializer):
-    """Aggregated statistics for admin dashboard.
-
-    Used by React-админка для отображения общей статистики:
-    - регистрации по дням,
-    - топ рефереров,
-    - доход по источникам.
-    """
-
     registrations_by_day = AdminRegistrationsByDaySerializer(many=True)
     top_referrers = AdminTopReferrerSerializer(many=True)
     income_by_source = AdminIncomeBySourceSerializer()
 
 
-# ============================
-# Test-only serializers
-# ============================
-
-
 class TestReferralChangeSerializer(serializers.Serializer):
-    """Single activated ancestor/descendant relation after a simulated deposit.""" 
-
     ancestor_id = serializers.IntegerField()
     level = serializers.IntegerField()
 
 
 class TestMemberDepositResultSerializer(serializers.Serializer):
-    """Result of a simulated deposit for a single member."""
-
     member = MemberSerializer()
     amount = serializers.IntegerField()
     v_coins_balance_before = serializers.DecimalField(max_digits=12, decimal_places=2)
@@ -1079,15 +936,11 @@ class TestMemberDepositResultSerializer(serializers.Serializer):
 
 
 class TestSimulateDepositsResponseSerializer(serializers.Serializer):
-    """Response schema for the test simulate-deposits endpoint."""
-
     status = serializers.CharField()
     deposits = TestMemberDepositResultSerializer(many=True)
 
 
 class SimulateDemoDepositsRequestSerializer(serializers.Serializer):
-    """Request payload for demo deposits simulation for Amir and Alfirа."""
-
     amount = serializers.IntegerField(
         required=False,
         min_value=1,
@@ -1101,16 +954,12 @@ class SimulateDemoDepositsRequestSerializer(serializers.Serializer):
 
 
 class SimulateDemoDepositsPlayerDepositSerializer(serializers.Serializer):
-    """Single deposit summary for a demo player."""
-
     id = serializers.IntegerField()
     amount = serializers.IntegerField()
     created_at = serializers.DateTimeField()
 
 
 class SimulateDemoDepositsPlayerSerializer(serializers.Serializer):
-    """Player (Амир or Альфира) with associated demo deposits."""
-
     member_id = serializers.IntegerField()
     name = serializers.CharField()
     phone = serializers.CharField()
@@ -1118,8 +967,6 @@ class SimulateDemoDepositsPlayerSerializer(serializers.Serializer):
 
 
 class SimulateDemoDepositsTimurSerializer(serializers.Serializer):
-    """Timur earnings summary for the demo deposits scenario."""
-
     member_id = serializers.IntegerField()
     name = serializers.CharField()
     phone = serializers.CharField()
@@ -1129,7 +976,5 @@ class SimulateDemoDepositsTimurSerializer(serializers.Serializer):
 
 
 class SimulateDemoDepositsResponseSerializer(serializers.Serializer):
-    """Response schema for the demo deposits simulation endpoint."""
-
     players = SimulateDemoDepositsPlayerSerializer(many=True)
     timur = SimulateDemoDepositsTimurSerializer()
