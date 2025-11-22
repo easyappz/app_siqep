@@ -23,6 +23,7 @@ from .views import (
     AdminStatsOverviewView,
     TestSimulateDepositsView,
     SimulateDemoDepositsView,
+    BusinessModelSimulationView,
 )
 
 urlpatterns = [
@@ -41,7 +42,6 @@ urlpatterns = [
         name="password-reset-confirm",
     ),
     path("auth/me/", MeView.as_view(), name="me"),
-    # Wallet endpoints
     path(
         "wallet/summary/",
         WalletSummaryView.as_view(),
@@ -78,7 +78,6 @@ urlpatterns = [
         WithdrawalRequestListCreateView.as_view(),
         name="withdrawal-requests",
     ),
-    # Admin panel endpoints
     path(
         "admin/members/",
         AdminMemberListCreateView.as_view(),
@@ -104,7 +103,6 @@ urlpatterns = [
         AdminStatsOverviewView.as_view(),
         name="admin-stats-overview",
     ),
-    # Test-only endpoints
     path(
         "test/simulate-deposits/",
         TestSimulateDepositsView.as_view(),
@@ -114,5 +112,10 @@ urlpatterns = [
         "test/simulate_demo_deposits/",
         SimulateDemoDepositsView.as_view(),
         name="simulate-demo-deposits",
+    ),
+    path(
+        "test/simulate-business-model/",
+        BusinessModelSimulationView.as_view(),
+        name="simulate-business-model",
     ),
 ]

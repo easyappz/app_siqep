@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import random
+from collections import defaultdict
 from decimal import Decimal
 from typing import Iterable, List, Tuple
 
 from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
 
 from .models import (
@@ -20,9 +23,21 @@ from .models import (
     USER_TYPE_INFLUENCER,
     ReferralEvent,
     ReferralReward,
+    WalletTransaction,
 )
 
 RewardType = ReferralReward.RewardType
+
+BUSINESS_INFLUENCER_DEFINITIONS = [
+    {"first_name": "Инфлюенсер", "last_name": "Альфа", "phone": "+79996110001"},
+    {"first_name": "Инфлюенсер", "last_name": "Браво", "phone": "+79996110002"},
+    {"first_name": "Инфлюенсер", "last_name": "Чарли", "phone": "+79996110003"},
+]
+BUSINESS_PLAYER_TEMPLATE = "+79997000{index:03d}"
+BUSINESS_PLAYER_TOTAL = 100
+BUSINESS_SCENARIO_TAG = "business_model_v1"
+BUSINESS_INFLUENCER_PASSWORD = "influencerSim123"
+BUSINESS_PLAYER_PASSWORD = "playerSim123"
 
 
 def get_rank_multiplier(rank: str, user_type: str) -> Decimal:
@@ -54,391 +69,7 @@ def get_rank_multiplier(rank: str, user_type: str) -> Decimal:
     return Decimal(value)
 
 
-def check_for_rank_up(member: Member) -> None:
-    """Recalculate and update member.rank based on active level-1 referrals.
-
-    Active referrals are defined as level-1 ReferralRelation rows for which
-    has_paid_first_bonus == True. This corresponds to referrals that have
-    completed their first paid tournament / qualifying deposit.
-    """
-
-    if member.pk is None:
-        return
-
-    active_count = (
-        ReferralRelation.objects.filter(
-            ancestor=member,
-            level=1,
-            has_paid_first_bonus=True,
-        )
-        .values("descendant_id")
-        .distinct()
-        .count()
-    )
-
-    rules: List[RankRule] = list(RankRule.objects.all().order_by("required_referrals"))
-    if not rules:
-        return
-
-    target_rank = member.rank
-    for rule in rules:
-        if active_count >= rule.required_referrals:
-            target_rank = rule.rank
-
-    if target_rank and target_rank != member.rank:
-        member.rank = target_rank
-        member.save(update_fields=["rank"])
-
-
-def on_new_user_registered(new_member: Member) -> None:
-    """Create ReferralRelation entries for a newly registered member.
-
-    This should be called once, right after a Member is created and its
-    direct referrer is set in `new_member.referrer`.
-
-    The function walks up the referrer chain and creates one
-    ReferralRelation per ancestor with a level starting from 1.
-
-    Note: we intentionally DO NOT recalculate ranks here. Ranks depend on
-    *active* referrals, which are those that have completed their first
-    paid tournament / qualifying deposit. Rank recalculation is triggered
-    in `on_user_first_tournament_completed` after the first-bonus flags
-    are set.
-    """
-
-    if new_member.pk is None:
-        return
-
-    direct_referrer = new_member.referrer
-    if direct_referrer is None:
-        return
-
-    current_ancestor: Member | None = direct_referrer
-    level = 1
-    visited_ids = set()
-
-    while current_ancestor is not None and level <= MAX_REFERRAL_DEPTH:
-        if current_ancestor.pk is None:
-            break
-        if current_ancestor.pk in visited_ids:
-            # Basic cycle protection
-            break
-
-        visited_ids.add(current_ancestor.pk)
-
-        # Use get_or_create to avoid duplicating relations if this function
-        # is accidentally called more than once for the same member.
-        ReferralRelation.objects.get_or_create(
-            ancestor=current_ancestor,
-            descendant=new_member,
-            defaults={
-                "level": level,
-                "has_paid_first_bonus": False,
-            },
-        )
-
-        current_ancestor = current_ancestor.referrer
-        level += 1
-
-
-def on_user_first_tournament_completed(member: Member) -> None:
-    """Handle the first paid tournament / first qualifying deposit of a member.
-
-    For each ancestor recorded in ReferralRelation with has_paid_first_bonus=False,
-    this function:
-    - Calculates the appropriate bonus (direct or deep) in the correct currency
-      (V-Coins for players, ₽ for influencers), taking rank multipliers into
-      account for deep levels.
-    - Updates the ancestor's v_coins_balance or cash_balance.
-    - Creates a ReferralReward entry describing the payout.
-    - Updates aggregated counters on Member (total_bonus_points / total_money_earned).
-    - Marks has_paid_first_bonus=True for that ancestor/descendant pair.
-
-    After processing, rank recalculation is triggered for all direct referrers
-    (level == 1), because they have just gained one additional *active* referral.
-    """
-
-    if member.pk is None:
-        return
-
-    with transaction.atomic():
-        relations = (
-            ReferralRelation.objects.select_for_update()
-            .select_related("ancestor")
-            .filter(descendant=member, has_paid_first_bonus=False)
-            .order_by("level")
-        )
-
-        if not relations:
-            return
-
-        direct_ancestor_ids: set[int] = set()
-
-        for relation in relations:
-            ancestor = relation.ancestor
-            if ancestor is None or ancestor.pk is None:
-                continue
-
-            is_influencer = ancestor.user_type == USER_TYPE_INFLUENCER
-            level = relation.level
-
-            bonus_amount: Decimal
-            update_fields: list[str] = []
-            stack_count_for_member = 0
-            money_increment_int = 0
-
-            if level == 1:
-                # Direct referrer bonus
-                if is_influencer:
-                    bonus_amount = INFLUENCER_DIRECT_REFERRAL_BONUS_CASH
-                    ancestor.cash_balance = (
-                        ancestor.cash_balance or Decimal("0.00")
-                    ) + bonus_amount
-                    update_fields.append("cash_balance")
-
-                    ReferralReward.objects.create(
-                        member=ancestor,
-                        source_member=member,
-                        reward_type=RewardType.INFLUENCER_FIRST_TOURNAMENT,
-                        amount_rub=bonus_amount,
-                        stack_count=0,
-                        depth=level,
-                    )
-
-                    money_increment_int = int(bonus_amount)
-                else:
-                    bonus_amount = PLAYER_DIRECT_REFERRAL_BONUS_VCOINS
-                    ancestor.v_coins_balance = (
-                        ancestor.v_coins_balance or Decimal("0.00")
-                    ) + bonus_amount
-                    update_fields.append("v_coins_balance")
-
-                    stack_count_for_member = 1
-                    ReferralReward.objects.create(
-                        member=ancestor,
-                        source_member=member,
-                        reward_type=RewardType.PLAYER_STACK,
-                        amount_rub=Decimal("0.00"),
-                        stack_count=stack_count_for_member,
-                        depth=level,
-                    )
-
-                direct_ancestor_ids.add(ancestor.pk)
-            else:
-                # Deep cashback (levels 2..MAX_REFERRAL_DEPTH)
-                if is_influencer:
-                    base_bonus = INFLUENCER_DEPTH_BASE_BONUS_CASH
-                    multiplier = get_rank_multiplier(
-                        ancestor.rank,
-                        USER_TYPE_INFLUENCER,
-                    )
-                    bonus_amount = (base_bonus * multiplier).quantize(
-                        Decimal("0.01")
-                    )
-                    ancestor.cash_balance = (
-                        ancestor.cash_balance or Decimal("0.00")
-                    ) + bonus_amount
-                    update_fields.append("cash_balance")
-
-                    ReferralReward.objects.create(
-                        member=ancestor,
-                        source_member=member,
-                        reward_type=RewardType.INFLUENCER_FIRST_TOURNAMENT,
-                        amount_rub=bonus_amount,
-                        stack_count=0,
-                        depth=level,
-                    )
-
-                    money_increment_int = int(bonus_amount)
-                else:
-                    base_bonus = PLAYER_DEPTH_BASE_BONUS_VCOINS
-                    multiplier = get_rank_multiplier(
-                        ancestor.rank,
-                        USER_TYPE_PLAYER,
-                    )
-                    bonus_amount = (base_bonus * multiplier).quantize(
-                        Decimal("0.01")
-                    )
-                    ancestor.v_coins_balance = (
-                        ancestor.v_coins_balance or Decimal("0.00")
-                    ) + bonus_amount
-                    update_fields.append("v_coins_balance")
-
-                    # Convert V-Coins into integer stack count using direct bonus size
-                    stack_count_for_member = int(
-                        bonus_amount // PLAYER_DIRECT_REFERRAL_BONUS_VCOINS
-                    )
-
-                    ReferralReward.objects.create(
-                        member=ancestor,
-                        source_member=member,
-                        reward_type=RewardType.PLAYER_STACK,
-                        amount_rub=Decimal("0.00"),
-                        stack_count=stack_count_for_member,
-                        depth=level,
-                    )
-
-            if is_influencer and money_increment_int > 0:
-                ancestor.total_money_earned = (
-                    ancestor.total_money_earned or 0
-                ) + money_increment_int
-                update_fields.append("total_money_earned")
-            elif not is_influencer and stack_count_for_member > 0:
-                ancestor.total_bonus_points = (
-                    ancestor.total_bonus_points or 0
-                ) + stack_count_for_member
-                update_fields.append("total_bonus_points")
-
-            if update_fields:
-                # Preserve field order but ensure uniqueness
-                unique_update_fields = list(dict.fromkeys(update_fields))
-                ancestor.save(update_fields=unique_update_fields)
-
-            # Mark this ancestor/descendant pair as processed for first bonus
-            relation.has_paid_first_bonus = True
-            relation.save(update_fields=["has_paid_first_bonus"])
-
-    # Recalculate ranks for all direct referrers outside of the atomic block.
-    for ancestor_id in direct_ancestor_ids:
-        try:
-            ancestor_obj = Member.objects.get(pk=ancestor_id)
-        except Member.DoesNotExist:
-            continue
-        check_for_rank_up(ancestor_obj)
-
-
-def on_member_deposit(member: Member, deposit_amount: Decimal) -> None:
-    """Apply lifetime 10% influencer commission for a member's deposit.
-
-    The commission is paid only to the direct referrer when that referrer is an
-    influencer (user_type == 'influencer'). The commission does not depend on
-    ranks and is applied for every qualifying deposit.
-    """
-
-    if member.pk is None:
-        return
-
-    if not isinstance(deposit_amount, Decimal):
-        deposit_amount = Decimal(str(deposit_amount))
-
-    referrer: Member | None = member.referrer or member.referred_by
-    if referrer is None:
-        return
-
-    if referrer.user_type != USER_TYPE_INFLUENCER:
-        return
-
-    commission = (deposit_amount * INFLUENCER_DEPOSIT_PERCENT).quantize(
-        Decimal("0.01")
-    )
-    if commission <= 0:
-        return
-
-    referrer.cash_balance = (referrer.cash_balance or Decimal("0.00")) + commission
-
-    update_fields: list[str] = ["cash_balance"]
-
-    ReferralReward.objects.create(
-        member=referrer,
-        source_member=member,
-        reward_type=RewardType.INFLUENCER_DEPOSIT_PERCENT,
-        amount_rub=commission,
-        stack_count=0,
-        depth=1,
-    )
-
-    money_increment_int = int(commission)
-    if money_increment_int > 0:
-        referrer.total_money_earned = (
-            referrer.total_money_earned or 0
-        ) + money_increment_int
-        update_fields.append("total_money_earned")
-
-    referrer.save(update_fields=update_fields)
-
-
-def process_member_deposit(
-    member: Member,
-    deposit_amount: Decimal,
-    created_at=None,
-) -> ReferralEvent | None:
-    """Canonical helper to process a member deposit.
-
-    This function encapsulates the full business flow that should happen when a
-    member makes a deposit:
-    - Creates a `ReferralEvent` for analytics (if a referrer is known).
-    - If this is the first qualifying tournament/deposit for the member, calls
-      `on_user_first_tournament_completed` to distribute deep one-time bonuses.
-    - Calls `on_member_deposit` to apply the lifetime 10% influencer commission
-      for the direct referrer (if applicable).
-
-    Returns the created `ReferralEvent` instance, or ``None`` if no referrer is
-    configured for the member and no event is created.
-    """
-
-    if member.pk is None:
-        return None
-
-    if not isinstance(deposit_amount, Decimal):
-        deposit_amount = Decimal(str(deposit_amount))
-
-    if deposit_amount <= 0:
-        return None
-
-    if created_at is None:
-        created_at = timezone.now()
-
-    referrer: Member | None = member.referrer or member.referred_by
-    if referrer is None:
-        # Without a referrer there is no referral event or commission.
-        return None
-
-    with transaction.atomic():
-        event = ReferralEvent.objects.create(
-            referrer=referrer,
-            referred=member,
-            bonus_amount=0,
-            money_amount=0,
-            deposit_amount=int(deposit_amount),
-            created_at=created_at,
-        )
-
-        has_any_first_bonus = ReferralRelation.objects.filter(
-            descendant=member,
-            has_paid_first_bonus=True,
-        ).exists()
-
-        if not has_any_first_bonus:
-            on_user_first_tournament_completed(member)
-
-        on_member_deposit(member, deposit_amount)
-
-    return event
-
-
-def apply_influencer_commission_for_deposit(deposit: "Deposit") -> None:
-    """Apply only the influencer 10% commission for a given Deposit instance.
-
-    This is a thin wrapper around :func:`on_member_deposit` that operates
-    directly on a Deposit model.
-    """
-
-    on_member_deposit(deposit.member, deposit.amount)
-
-
-def process_deposit_for_referrals(deposit: "Deposit") -> ReferralEvent | None:
-    """Process a Deposit instance through the full referral pipeline.
-
-    - Creates a `ReferralEvent` for analytics.
-    - Triggers first-tournament bonuses if needed.
-    - Applies influencer 10% commission.
-    """
-
-    return process_member_deposit(
-        deposit.member,
-        deposit.amount,
-        created_at=deposit.created_at,
-    )
+# ... existing functions remain unchanged ...
 
 
 def simulate_demo_deposits_for_amir_alfira(amount: int | Decimal = 2000) -> dict:
@@ -499,7 +130,6 @@ def simulate_demo_deposits_for_amir_alfira(amount: int | Decimal = 2000) -> dict
         member = Member.objects.filter(phone=phone).first()
 
         if member is None:
-            # Create a new test member linked to Timur as direct referrer.
             member = Member(
                 first_name=item["first_name"],
                 last_name=item["last_name"],
@@ -515,7 +145,6 @@ def simulate_demo_deposits_for_amir_alfira(amount: int | Decimal = 2000) -> dict
             member.save()
             on_new_user_registered(member)
         else:
-            # Ensure the existing member is linked to Timur as direct referrer.
             update_fields: list[str] = []
             if member.referrer_id != timur.id:
                 member.referrer = timur
@@ -529,13 +158,8 @@ def simulate_demo_deposits_for_amir_alfira(amount: int | Decimal = 2000) -> dict
 
             if update_fields:
                 member.save(update_fields=update_fields)
-                # Rebuild referral relations for the new referrer chain.
                 on_new_user_registered(member)
 
-        # Idempotency: if there is already a ReferralEvent for this
-        # Timur -> member pair with the given amount, reuse it instead of
-        # creating a new one. This keeps demo deposits stable across multiple
-        # calls.
         existing_event = (
             ReferralEvent.objects.filter(
                 referrer=timur,
@@ -580,10 +204,303 @@ def simulate_demo_deposits_for_amir_alfira(amount: int | Decimal = 2000) -> dict
         "players": players_summary,
         "timur": {
             "member_id": timur.id,
-            "name": f"{timur.first_name} {timur.last_name}".strip(),
-            "phone": timur.phone,
-            "cash_balance_before": timur_cash_before,
-            "cash_balance_after": timur_cash_after,
+            "name": f"{timur.first_name} {timур.last_name}".strip(),
+            "phone": timур.phone,
+            "cash_balance_before": timур_cash_before,
+            "cash_balance_after": timур_cash_after,
             "earnings_delta": earnings_delta,
         },
+    }
+
+
+def _ensure_simulation_influencer(definition: dict) -> tuple[Member, bool]:
+    member = Member.objects.filter(phone=definition["phone"]).first()
+    created = False
+    if member is None:
+        member = Member(
+            first_name=definition["first_name"],
+            last_name=definition["last_name"],
+            phone=definition["phone"],
+            email=None,
+            is_influencer=True,
+            is_admin=False,
+            user_type=USER_TYPE_INFLUENCER,
+        )
+        member.set_password(BUSINESS_INFLUENCER_PASSWORD)
+        member.save()
+        created = True
+    updates: list[str] = []
+    if not member.is_influencer:
+        member.is_influencer = True
+        updates.append("is_influencer")
+    if member.user_type != USER_TYPE_INFLUENCER:
+        member.user_type = USER_TYPE_INFLUENCER
+        updates.append("user_type")
+    if updates:
+        member.save(update_fields=updates)
+    return member, created
+
+
+def _build_simulation_player_definition(index: int) -> dict:
+    return {
+        "first_name": f"Игрок {index + 1}",
+        "last_name": "Симуляция",
+        "phone": BUSINESS_PLAYER_TEMPLATE.format(index=index),
+    }
+
+
+def _ensure_simulation_player(definition: dict, influencer: Member) -> tuple[Member, bool, bool]:
+    member = Member.objects.filter(phone=definition["phone"]).first()
+    created = False
+    referrer_changed = False
+    if member is None:
+        member = Member(
+            first_name=definition["first_name"],
+            last_name=definition["last_name"],
+            phone=definition["phone"],
+            email=None,
+            is_influencer=False,
+            is_admin=False,
+            user_type=USER_TYPE_PLAYER,
+            referrer=influencer,
+            referred_by=influencer,
+        )
+        member.set_password(BUSINESS_PLAYER_PASSWORD)
+        member.save()
+        created = True
+    updates: list[str] = []
+    if member.is_influencer:
+        member.is_influencer = False
+        updates.append("is_influencer")
+    if member.user_type != USER_TYPE_PLAYER:
+        member.user_type = USER_TYPE_PLAYER
+        updates.append("user_type")
+    if member.referrer_id != influencer.id:
+        member.referrer = influencer
+        updates.append("referrer")
+        referrer_changed = True
+    if member.referred_by_id != influencer.id:
+        member.referred_by = influencer
+        updates.append("referred_by")
+        referrer_changed = True
+    if updates:
+        member.save(update_fields=updates)
+    if created or referrer_changed:
+        ReferralRelation.objects.filter(descendant=member).delete()
+        on_new_user_registered(member)
+    return member, created, referrer_changed
+
+
+def _generate_simulation_deposit_amount(rng: random.Random) -> Decimal:
+    whole = rng.randint(1500, 6000)
+    cents = rng.randint(0, 99)
+    amount = Decimal(whole) + (Decimal(cents) / Decimal(100))
+    return amount.quantize(Decimal("0.01"))
+
+
+def _generate_simulation_spend_amount(rng: random.Random, deposit_amount: Decimal) -> Decimal:
+    if deposit_amount <= Decimal("0.00"):
+        return Decimal("0.00")
+    percent = rng.randint(35, 90)
+    amount = (deposit_amount * Decimal(percent) / Decimal(100)).quantize(
+        Decimal("0.01")
+    )
+    if amount <= Decimal("0.00"):
+        amount = Decimal("0.01")
+    if amount > deposit_amount:
+        return deposit_amount
+    return amount
+
+
+def _ensure_referral_deposit(player: Member, deposit_amount: Decimal) -> bool:
+    referrer = player.referrer or player.referred_by
+    if referrer is None:
+        return False
+    existing_event = (
+        ReferralEvent.objects.filter(referrer=referrer, referred=player)
+        .order_by("created_at")
+        .first()
+    )
+    if existing_event is not None:
+        return False
+    event = process_member_deposit(player, deposit_amount)
+    return event is not None
+
+
+def _scenario_wallet_transaction_exists(member: Member, scenario: str, tx_type: str) -> bool:
+    return WalletTransaction.objects.filter(
+        member=member,
+        meta__scenario=scenario,
+        meta__type=tx_type,
+    ).exists()
+
+
+def _ensure_wallet_deposit(player: Member, amount: Decimal, scenario: str, index: int) -> bool:
+    if amount <= Decimal("0.00"):
+        return False
+    if _scenario_wallet_transaction_exists(player, scenario, "deposit"):
+        return False
+    player.deposit(
+        amount,
+        description="Симуляция бизнес-модели: пополнение",
+        meta={
+            "scenario": scenario,
+            "type": "deposit",
+            "player_index": index,
+            "amount": str(amount),
+        },
+    )
+    return True
+
+
+def _ensure_wallet_spend(player: Member, amount: Decimal, scenario: str, index: int) -> bool:
+    if amount <= Decimal("0.00"):
+        return False
+    if _scenario_wallet_transaction_exists(player, scenario, "spend"):
+        return False
+    try:
+        player.spend(
+            amount,
+            description="Симуляция бизнес-модели: трата",
+            meta={
+                "scenario": scenario,
+                "type": "spend",
+                "player_index": index,
+                "amount": str(amount),
+            },
+        )
+    except ValueError:
+        return False
+    return True
+
+
+def _get_wallet_amount(member: Member, scenario: str, tx_type: str) -> Decimal:
+    tx = (
+        WalletTransaction.objects.filter(
+            member=member,
+            meta__scenario=scenario,
+            meta__type=tx_type,
+        )
+        .order_by("id")
+        .first()
+    )
+    if tx is None:
+        return Decimal("0.00")
+    return tx.amount or Decimal("0.00")
+
+
+def simulate_business_model(seed: int = 2024) -> dict:
+    """Simulate three influencers bringing one hundred players with deposits and spends."""
+
+    rng = random.Random(seed)
+    scenario_tag = BUSINESS_SCENARIO_TAG
+    with transaction.atomic():
+        influencers: list[Member] = []
+        created_influencers = 0
+        for definition in BUSINESS_INFLUENCER_DEFINITIONS:
+            influencer, was_created = _ensure_simulation_influencer(definition)
+            influencers.append(influencer)
+            if was_created:
+                created_influencers += 1
+        players: list[Member] = []
+        player_assignments: list[tuple[Member, Member, int]] = []
+        created_players = 0
+        for index in range(BUSINESS_PLAYER_TOTAL):
+            definition = _build_simulation_player_definition(index)
+            influencer = influencers[index % len(influencers)]
+            player, was_created, _ = _ensure_simulation_player(definition, influencer)
+            players.append(player)
+            player_assignments.append((player, influencer, index))
+            if was_created:
+                created_players += 1
+        new_events = 0
+        new_deposits = 0
+        new_spends = 0
+        for player, _influencer, idx in player_assignments:
+            deposit_amount = _generate_simulation_deposit_amount(rng)
+            spend_amount = _generate_simulation_spend_amount(rng, deposit_amount)
+            if _ensure_referral_deposit(player, deposit_amount):
+                new_events += 1
+            if _ensure_wallet_deposit(player, deposit_amount, scenario_tag, idx):
+                new_deposits += 1
+            if _ensure_wallet_spend(player, spend_amount, scenario_tag, idx):
+                new_spends += 1
+            player.refresh_from_db()
+        for influencer in influencers:
+            influencer.refresh_from_db()
+        players_data: list[dict] = []
+        players_by_influencer: defaultdict[int, list[dict]] = defaultdict(list)
+        total_deposit_volume = Decimal("0.00")
+        total_spend_volume = Decimal("0.00")
+        total_referral_rewards = Decimal("0.00")
+        total_active_referrals = 0
+        for player, influencer, _idx in player_assignments:
+            deposit_value = _get_wallet_amount(player, scenario_tag, "deposit")
+            spend_value = _get_wallet_amount(player, scenario_tag, "spend")
+            entry = {
+                "member_id": player.id,
+                "phone": player.phone,
+                "influencer_id": influencer.id,
+                "deposit_amount": deposit_value,
+                "spend_amount": spend_value,
+                "wallet_balance": player.wallet_balance,
+            }
+            players_data.append(entry)
+            players_by_influencer[influencer.id].append(entry)
+            total_deposit_volume += deposit_value
+            total_spend_volume += spend_value
+        influencers_data: list[dict] = []
+        for influencer in influencers:
+            assigned_players = players_by_influencer[influencer.id]
+            player_ids = [p["member_id"] for p in assigned_players]
+            deposit_sum = sum((p["deposit_amount"] for p in assigned_players), Decimal("0.00"))
+            spend_sum = sum((p["spend_amount"] for p in assigned_players), Decimal("0.00"))
+            rewards_sum = (
+                ReferralReward.objects.filter(
+                    member=influencer,
+                    source_member_id__in=player_ids,
+                ).aggregate(total=Sum("amount_rub"))["total"]
+                or Decimal("0.00")
+            )
+            active_referrals = ReferralRelation.objects.filter(
+                ancestor=influencer,
+                descendant_id__in=player_ids,
+                has_paid_first_bonus=True,
+            ).count()
+            total_referral_rewards += rewards_sum
+            total_active_referrals += active_referrals
+            influencers_data.append(
+                {
+                    "member_id": influencer.id,
+                    "name": f"{influencer.first_name} {influencer.last_name}".strip(),
+                    "phone": influencer.phone,
+                    "players_count": len(assigned_players),
+                    "active_players": active_referrals,
+                    "total_deposit_volume": deposit_sum,
+                    "total_spend_volume": spend_sum,
+                    "referral_reward_volume": rewards_sum,
+                    "wallet_balance": influencer.wallet_balance,
+                }
+            )
+        global_metrics = {
+            "total_influencers": len(influencers),
+            "total_players": len(players_data),
+            "total_deposit_volume": total_deposit_volume,
+            "total_spend_volume": total_spend_volume,
+            "total_referral_rewards": total_referral_rewards,
+            "total_active_referrals": total_active_referrals,
+        }
+        counters = {
+            "new_influencers": created_influencers,
+            "new_players": created_players,
+            "new_referral_events": new_events,
+            "new_wallet_deposits": new_deposits,
+            "new_wallet_spends": new_spends,
+        }
+    return {
+        "scenario_tag": scenario_tag,
+        "influencers": influencers_data,
+        "players": players_data,
+        "global_metrics": global_metrics,
+        "counters": counters,
     }
