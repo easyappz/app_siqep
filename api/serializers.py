@@ -95,3 +95,25 @@ class BusinessSimulationResponseSerializer(serializers.Serializer):
     players = BusinessSimulationPlayerSerializer(many=True)
     global_metrics = BusinessSimulationGlobalMetricsSerializer()
     counters = BusinessSimulationCountersSerializer()
+
+
+class AdminWalletOperationRequestSerializer(serializers.Serializer):
+    member_id = serializers.IntegerField(min_value=1)
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
+    scenario = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=64)
+    description = serializers.CharField(required=False, allow_blank=True, max_length=255)
+
+
+class AdminWalletOperationResponseSerializer(serializers.Serializer):
+    member_id = serializers.IntegerField()
+    full_name = serializers.CharField()
+    phone = serializers.CharField()
+    wallet_balance = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_deposits = serializers.DecimalField(max_digits=14, decimal_places=2)
+    total_referral_rewards = serializers.DecimalField(max_digits=14, decimal_places=2)
+    transaction_id = serializers.IntegerField()
+    transaction_type = serializers.CharField()
+    transaction_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    balance_after = serializers.DecimalField(max_digits=12, decimal_places=2)
+    scenario_tag = serializers.CharField(allow_blank=True)
+    message = serializers.CharField()
